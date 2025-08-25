@@ -14,6 +14,7 @@ pub trait Serable {
 
 //ty amos: https://fasterthanli.me/articles/the-case-for-sans-io#the-structure-of-rc-zip
 /// Indicates whether the state machine has completed its work
+#[derive(Debug)]
 pub enum FsmResult<M, R> {
     /// The I/O loop needs to continue, the state machine is given back.
     Continue(M),

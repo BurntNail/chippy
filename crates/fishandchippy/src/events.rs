@@ -7,6 +7,7 @@ pub mod server;
 pub mod client;
 
 const TEXT_MESSAGE: u8 = 1;
+const QUIT: u8 = 2;
 
 #[derive(Debug)]
 pub enum EventReadError {

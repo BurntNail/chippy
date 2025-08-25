@@ -1,10 +1,8 @@
-
 pub mod events;
-
 pub mod ser_glue;
 pub mod integer; //yoinked from souris lol
 
-fn display_bytes_as_hex_array(b: &[u8]) -> String {
+pub fn display_bytes_as_hex_array(b: &[u8]) -> String {
     let mut out;
     match b.len() {
         0 => out = "[]".to_string(),
@@ -19,3 +17,4 @@ fn display_bytes_as_hex_array(b: &[u8]) -> String {
     };
     out
 }
+

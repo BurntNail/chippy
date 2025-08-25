@@ -1,4 +1,4 @@
-use crate::events::{EventReadError, TEXT_MESSAGE};
+use crate::events::{EventReadError, QUIT, TEXT_MESSAGE};
 use crate::integer::{Integer, IntegerDeserialiser, SignedState};
 use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
@@ -7,7 +7,8 @@ pub enum EventToClient {
     TxtSent {
         name: String,
         content: String
-    }
+    },
+    ServerEnd
 }
 
 impl Serable for EventToClient {
@@ -23,6 +24,9 @@ impl Serable for EventToClient {
 
                 into.extend_from_slice(name.as_bytes());
                 into.extend_from_slice(content.as_bytes());
+            }
+            EventToClient::ServerEnd => {
+                into.push(QUIT);
             }
         }
 
@@ -85,7 +89,8 @@ impl DeserMachine for ClientEventDeserer {
             Self::Start(n) => Ok(FsmResult::Continue(Self::Start(n))),
             Self::GotStart(n) => match n {
                 TEXT_MESSAGE => Ok(FsmResult::Continue(Self::DeseringTxtMsg(TxtDeserer::new()))),
-                n => Err(EventReadError::InvalidKind(n)),
+                QUIT => Ok(FsmResult::Done(EventToClient::ServerEnd)),
+                n => Err(EventReadError::InvalidKind(n))
             }
             Self::DeseringTxtMsg(deser) => match deser.process()? {
                 FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringTxtMsg(deser))),
@@ -173,7 +178,7 @@ impl DeserMachine for TxtDeserer {
                 }
                 FsmResult::Done(int) => {
                     let len = int.try_into()?;
-                    Ok(FsmResult::Continue(Self::DeseringContentLen(len, Integer::deser())))
+                    Ok(FsmResult::Continue(Self::DeseringContentLen(len, Integer::deser_with_input(SignedState::Unsigned))))
                 }
             }
             Self::DeseringContentLen(name_bytes_left, deser) => match deser.process()? {

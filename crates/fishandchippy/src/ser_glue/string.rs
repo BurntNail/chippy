@@ -1,14 +1,19 @@
 use std::fmt::{Display, Formatter};
 use std::string::FromUtf8Error;
-use crate::integer::{Integer, IntegerDeserialiser, IntegerReadError};
+use crate::integer::{Integer, IntegerDeserialiser, IntegerReadError, SignedState};
 use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult};
 
+#[derive(Debug)]
 pub enum StringDeserer {
     DeseringLen(IntegerDeserialiser),
     ReadingContent {
         bytes_left: usize,
         content_so_far: Vec<u8>
     }
+}
+
+impl Deserable for String {
+    type Deserer = StringDeserer;
 }
 
 #[derive(Debug)]
@@ -52,7 +57,7 @@ impl DeserMachine for StringDeserer {
     type Error = StringReadError;
 
     fn new() -> Self {
-        Self::DeseringLen(Integer::deser())
+        Self::DeseringLen(Integer::deser_with_input(SignedState::Unsigned))
     }
 
     fn new_with_starting_input((): Self::StartingInput) -> Self {

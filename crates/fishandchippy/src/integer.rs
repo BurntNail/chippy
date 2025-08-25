@@ -2,7 +2,6 @@
 
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::num::ParseIntError;
 use crate::{display_bytes_as_hex_array};
 use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
@@ -367,6 +366,7 @@ impl Deserable for Integer {
     type Deserer = IntegerDeserialiser;
 }
 
+#[derive(Debug)]
 pub enum IntegerDeserialiser {
     Start,
     GotSignedState {
@@ -402,7 +402,7 @@ impl DeserMachine for IntegerDeserialiser {
 
     fn wants_read(&mut self) -> DesiredInput {
         match self {
-            Self::Start => DesiredInput::Start, 
+            Self::Start => DesiredInput::Start,
             Self::GotSignedState {
                 state: _, to_be_first_byte
             } => DesiredInput::Byte(to_be_first_byte),
