@@ -2,14 +2,14 @@ pub mod string;
 
 pub trait Serable {
     type ExtraOutput;
-    
-    fn ser (&self) -> (Self::ExtraOutput, Vec<u8>) {
+
+    fn ser(&self) -> (Self::ExtraOutput, Vec<u8>) {
         let mut vec = vec![];
         let extra = self.ser_into(&mut vec);
 
         (extra, vec)
     }
-    fn ser_into (&self, into: &mut Vec<u8>) -> Self::ExtraOutput;
+    fn ser_into(&self, into: &mut Vec<u8>) -> Self::ExtraOutput;
 }
 
 //ty amos: https://fasterthanli.me/articles/the-case-for-sans-io#the-structure-of-rc-zip
@@ -32,11 +32,13 @@ pub enum DesiredInput<'a> {
 
 pub trait Deserable {
     type Deserer: DeserMachine<Output = Self>;
-    
-    fn deser () -> Self::Deserer {
+
+    #[must_use]
+    fn deser() -> Self::Deserer {
         Self::Deserer::new()
     }
-    fn deser_with_input (input: <Self::Deserer as DeserMachine>::StartingInput) -> Self::Deserer {
+    #[must_use]
+    fn deser_with_input(input: <Self::Deserer as DeserMachine>::StartingInput) -> Self::Deserer {
         Self::Deserer::new_with_starting_input(input)
     }
 }
@@ -45,11 +47,12 @@ pub trait DeserMachine: Sized {
     type StartingInput;
     type Output;
     type Error;
-    
-    fn new () -> Self;
-    fn new_with_starting_input (input: Self::StartingInput) -> Self;
-    fn wants_read (&mut self) -> DesiredInput;
+
+    fn new() -> Self;
+    fn new_with_starting_input(input: Self::StartingInput) -> Self;
+    fn wants_read(&mut self) -> DesiredInput;
     fn give_starting_input(&mut self, magic: Self::StartingInput);
-    fn finish_bytes_for_writing (&mut self, n: usize);
-    fn process (self) -> Result<FsmResult<Self, Self::Output>, Self::Error>;
+    fn finish_bytes_for_writing(&mut self, n: usize);
+    #[allow(clippy::missing_errors_doc)] //you provide it lol i have no clue what the problem could be
+    fn process(self) -> Result<FsmResult<Self, Self::Output>, Self::Error>;
 }

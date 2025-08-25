@@ -1,12 +1,14 @@
+#![warn(clippy::all, clippy::nursery, clippy::pedantic)]
+
+use fishandchippy::events::client::EventToClient;
+use fishandchippy::events::server::EventToServer;
+use fishandchippy::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 use std::io::ErrorKind;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
-use fishandchippy::events::client::EventToClient;
-use fishandchippy::events::server::EventToServer;
-use fishandchippy::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
 struct DecOnDrop(Arc<AtomicUsize>);
 impl Drop for DecOnDrop {
@@ -15,14 +17,17 @@ impl Drop for DecOnDrop {
     }
 }
 
-pub fn eof_or_panic<T> (res: tokio::io::Result<T>) -> Option<T> {
+#[allow(clippy::missing_panics_doc)] //in the name :)
+pub fn eof_or_panic<T>(res: tokio::io::Result<T>) -> Option<T> {
     match res {
         Ok(n) => Some(n),
-        Err(e) => if e.kind() == ErrorKind::UnexpectedEof {
-            //we quit :)
-            None
-        } else {
-            panic!("{e:?}"); //FIXME: unwrap
+        Err(e) => {
+            if e.kind() == ErrorKind::UnexpectedEof {
+                //we quit :)
+                None
+            } else {
+                panic!("{e:?}"); //FIXME: unwrap
+            }
         }
     }
 }
@@ -73,9 +78,9 @@ async fn main() -> color_eyre::Result<()> {
                                     EventToServer::SendMessage(content) => {
                                         let _ = send_event.send(EventToClient::TxtSent {
                                             name: name.clone(),
-                                            content
+                                            content,
                                         });
-                                    },
+                                    }
                                     EventToServer::Quit => {
                                         println!("{name} disconnected");
                                         let _ = send_event.send(EventToClient::TxtSent {
@@ -83,7 +88,7 @@ async fn main() -> color_eyre::Result<()> {
                                             content: "LEFT SERVER".to_string(),
                                         });
                                         break;
-                                    },
+                                    }
                                 }
                                 EventToServer::deser()
                             }
@@ -96,7 +101,7 @@ async fn main() -> color_eyre::Result<()> {
 
                 while let Ok(msg) = recv_event.try_recv() {
                     msg_buffer.clear();
-                    let _ = msg.ser_into(&mut msg_buffer); //avoid re-allocating every time
+                    msg.ser_into(&mut msg_buffer); //avoid re-allocating every time
                     //possible issue - large message balloons it and not freed??
 
                     stream.write_all(&msg_buffer).await.unwrap(); //FIXME: unwrap
@@ -104,8 +109,6 @@ async fn main() -> color_eyre::Result<()> {
             }
         });
     }
-
-
 
     Ok(())
 }

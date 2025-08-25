@@ -1,7 +1,7 @@
 use crate::events::{EventReadError, QUIT, TEXT_MESSAGE};
-use crate::integer::{Integer};
-use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
+use crate::integer::Integer;
 use crate::ser_glue::string::StringDeserer;
+use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
 #[derive(Clone, Debug)]
 pub enum EventToServer {
@@ -14,13 +14,13 @@ impl Serable for EventToServer {
 
     fn ser_into(&self, into: &mut Vec<u8>) -> Self::ExtraOutput {
         match self {
-            EventToServer::SendMessage(msg) => {
+            Self::SendMessage(msg) => {
                 into.push(TEXT_MESSAGE);
 
                 Integer::from(msg.len()).ser_into(into); //can ignore signed state as is always unsigned
                 into.extend_from_slice(msg.as_bytes());
-            },
-            EventToServer::Quit => {
+            }
+            Self::Quit => {
                 into.push(QUIT);
             }
         }
@@ -35,7 +35,7 @@ impl Deserable for EventToServer {
 pub enum ServerEventDeserer {
     Start(u8),
     GotStart(u8),
-    DeseringTxtMsg(StringDeserer)
+    DeseringTxtMsg(StringDeserer),
 }
 
 impl DeserMachine for ServerEventDeserer {
@@ -73,8 +73,8 @@ impl DeserMachine for ServerEventDeserer {
             Self::DeseringTxtMsg(mut deser) => {
                 deser.finish_bytes_for_writing(n);
                 Self::DeseringTxtMsg(deser)
-            },
-            waiting => waiting,
+            }
+            waiting @ Self::GotStart(_) => waiting,
         }
     }
 
@@ -85,12 +85,11 @@ impl DeserMachine for ServerEventDeserer {
                 TEXT_MESSAGE => Ok(FsmResult::Continue(Self::DeseringTxtMsg(String::deser()))),
                 QUIT => Ok(FsmResult::Done(EventToServer::Quit)),
                 n => Err(EventReadError::InvalidKind(n)),
-            }
+            },
             Self::DeseringTxtMsg(deser) => match deser.process()? {
                 FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringTxtMsg(deser))),
-                FsmResult::Done(msg) => Ok(FsmResult::Done(EventToServer::SendMessage(msg)))
-            }
+                FsmResult::Done(msg) => Ok(FsmResult::Done(EventToServer::SendMessage(msg))),
+            },
         }
     }
 }
-

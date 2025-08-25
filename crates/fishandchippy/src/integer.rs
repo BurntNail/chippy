@@ -1,9 +1,9 @@
 //! A module containing a struct [`Integer`] designed to minimise size when serialised.
 
+use crate::display_bytes_as_hex_array;
+use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use crate::{display_bytes_as_hex_array};
-use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
 ///This represents whether a number is signed or unsigned. There are conversions to/from [`u8`]s which use two bytes.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
@@ -322,14 +322,14 @@ pub enum IntegerReadError {
 impl Display for IntegerReadError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
-            IntegerReadError::InvalidSignedStateDiscriminant(b) => {
+            Self::InvalidSignedStateDiscriminant(b) => {
                 write!(f, "Invalid signed state discriminant found: {b:#b}")
             }
-            IntegerReadError::NotEnoughBytes => write!(f, "Not enough bytes provided"),
-            IntegerReadError::TooBigToFit => {
+            Self::NotEnoughBytes => write!(f, "Not enough bytes provided"),
+            Self::TooBigToFit => {
                 write!(f, "Attempted to deserialise into size too small to fit")
             }
-            IntegerReadError::SignError => write!(f, "Tried to fit integer into incorrect sign"),
+            Self::SignError => write!(f, "Tried to fit integer into incorrect sign"),
         }
     }
 }
@@ -351,6 +351,7 @@ impl Serable for Integer {
         let stored_size = self.number_of_bytes_used;
         let bytes = self.content;
 
+        #[allow(clippy::cast_possible_truncation)]
         let size = ONE_BYTE_MAX_SIZE + stored_size as u8;
 
         into.push(size);
@@ -375,7 +376,7 @@ pub enum IntegerDeserialiser {
     },
     GotSignedStateAndFirstByte {
         state: SignedState,
-        first_byte: u8
+        first_byte: u8,
     },
     GotLenAndSomeBytes {
         state: SignedState,
@@ -396,7 +397,8 @@ impl DeserMachine for IntegerDeserialiser {
 
     fn new_with_starting_input(state: Self::StartingInput) -> Self {
         Self::GotSignedState {
-            state, to_be_first_byte: 0
+            state,
+            to_be_first_byte: 0,
         }
     }
 
@@ -404,15 +406,17 @@ impl DeserMachine for IntegerDeserialiser {
         match self {
             Self::Start => DesiredInput::Start,
             Self::GotSignedState {
-                state: _, to_be_first_byte
+                state: _,
+                to_be_first_byte,
             } => DesiredInput::Byte(to_be_first_byte),
-            Self::GotSignedStateAndFirstByte {..} => DesiredInput::ProcessMe,
             Self::GotLenAndSomeBytes {
                 state: _,
                 so_far,
-                space
+                space,
             } => DesiredInput::Bytes(&mut space[*so_far..]),
-            Self::GotAllBytes(_, _) => DesiredInput::ProcessMe
+            Self::GotSignedStateAndFirstByte { .. } | Self::GotAllBytes(_, _) => {
+                DesiredInput::ProcessMe
+            }
         }
     }
 
@@ -420,42 +424,50 @@ impl DeserMachine for IntegerDeserialiser {
         if matches!(self, Self::Start) {
             *self = Self::GotSignedState {
                 state,
-                to_be_first_byte: 0
+                to_be_first_byte: 0,
             };
         }
     }
 
     fn finish_bytes_for_writing(&mut self, n: usize) {
         match core::mem::replace(self, Self::Start) {
-            IntegerDeserialiser::Start => {}
-            IntegerDeserialiser::GotSignedState { state, to_be_first_byte } => {
-                *self = IntegerDeserialiser::GotSignedStateAndFirstByte {state, first_byte: to_be_first_byte};
+            Self::Start => {}
+            Self::GotSignedState {
+                state,
+                to_be_first_byte,
+            } => {
+                *self = Self::GotSignedStateAndFirstByte {
+                    state,
+                    first_byte: to_be_first_byte,
+                };
             }
-            IntegerDeserialiser::GotSignedStateAndFirstByte { state, first_byte } => {
-                *self = IntegerDeserialiser::GotSignedStateAndFirstByte {state, first_byte};
+            Self::GotSignedStateAndFirstByte { state, first_byte } => {
+                *self = Self::GotSignedStateAndFirstByte { state, first_byte };
             }
-            IntegerDeserialiser::GotLenAndSomeBytes {
-                state, so_far, space
+            Self::GotLenAndSomeBytes {
+                state,
+                so_far,
+                space,
             } => {
                 *self = if so_far + n == space.len() {
-                    IntegerDeserialiser::GotAllBytes(state, space)
+                    Self::GotAllBytes(state, space)
                 } else {
-                    IntegerDeserialiser::GotLenAndSomeBytes {
+                    Self::GotLenAndSomeBytes {
                         state,
                         so_far: so_far + n,
                         space,
                     }
                 };
             }
-            IntegerDeserialiser::GotAllBytes(state, bytes) => {
-                *self = IntegerDeserialiser::GotAllBytes(state, bytes);
+            Self::GotAllBytes(state, bytes) => {
+                *self = Self::GotAllBytes(state, bytes);
             }
         }
     }
 
     fn process(self) -> Result<FsmResult<Self, Self::Output>, Self::Error> {
         match self {
-            IntegerDeserialiser::GotSignedStateAndFirstByte { state, first_byte } => {
+            Self::GotSignedStateAndFirstByte { state, first_byte } => {
                 if first_byte <= ONE_BYTE_MAX_SIZE {
                     let mut content = if state == SignedState::SignedNegative {
                         [u8::MAX; INTEGER_MAX_SIZE]
@@ -472,14 +484,14 @@ impl DeserMachine for IntegerDeserialiser {
                         number_of_bytes_used,
                     }))
                 } else {
-                    Ok(FsmResult::Continue(IntegerDeserialiser::GotLenAndSomeBytes {
+                    Ok(FsmResult::Continue(Self::GotLenAndSomeBytes {
                         state,
                         so_far: 0,
                         space: vec![0; (first_byte - ONE_BYTE_MAX_SIZE) as usize],
                     }))
                 }
             }
-            IntegerDeserialiser::GotAllBytes(signed_state, bytes_stored) => {
+            Self::GotAllBytes(signed_state, bytes_stored) => {
                 let mut content = if signed_state == SignedState::SignedNegative {
                     [u8::MAX; INTEGER_MAX_SIZE]
                 } else {
@@ -489,15 +501,13 @@ impl DeserMachine for IntegerDeserialiser {
                     content[i] = b;
                 }
 
-                Ok(FsmResult::Done( Integer{
+                Ok(FsmResult::Done(Integer {
                     signed_state,
                     content,
                     number_of_bytes_used: bytes_stored.len(),
                 }))
             }
-            waiting_for_data_states => {
-                Ok(FsmResult::Continue(waiting_for_data_states))
-            }
+            waiting_for_data_states => Ok(FsmResult::Continue(waiting_for_data_states)),
         }
     }
 }

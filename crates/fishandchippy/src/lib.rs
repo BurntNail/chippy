@@ -1,8 +1,13 @@
-pub mod events;
-pub mod ser_glue;
-pub mod integer; //yoinked from souris lol
+#![warn(clippy::all, clippy::nursery, clippy::pedantic)]
 
+pub mod events;
+pub mod integer;
+pub mod ser_glue; //yoinked from souris lol
+
+#[must_use]
 pub fn display_bytes_as_hex_array(b: &[u8]) -> String {
+    use std::fmt::Write;
+
     let mut out;
     match b.len() {
         0 => out = "[]".to_string(),
@@ -10,11 +15,10 @@ pub fn display_bytes_as_hex_array(b: &[u8]) -> String {
         _ => {
             out = format!("[{:#X}", b[0]);
             for b in b.iter().skip(1) {
-                out.push_str(&format!(", {b:#X}"));
+                let _ = write!(&mut out, ", {b:#X}");
             }
             out.push(']');
         }
-    };
+    }
     out
 }
-

@@ -4,11 +4,8 @@ use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable}
 
 #[derive(Clone, Debug)]
 pub enum EventToClient {
-    TxtSent {
-        name: String,
-        content: String
-    },
-    ServerEnd
+    TxtSent { name: String, content: String },
+    ServerEnd,
 }
 
 impl Serable for EventToClient {
@@ -16,7 +13,7 @@ impl Serable for EventToClient {
 
     fn ser_into(&self, into: &mut Vec<u8>) -> Self::ExtraOutput {
         match self {
-            EventToClient::TxtSent { name, content } => {
+            Self::TxtSent { name, content } => {
                 into.push(TEXT_MESSAGE); //message kind
 
                 Integer::from(name.len()).ser_into(into);
@@ -25,12 +22,10 @@ impl Serable for EventToClient {
                 into.extend_from_slice(name.as_bytes());
                 into.extend_from_slice(content.as_bytes());
             }
-            EventToClient::ServerEnd => {
+            Self::ServerEnd => {
                 into.push(QUIT);
             }
         }
-
-        ()
     }
 }
 
@@ -79,8 +74,8 @@ impl DeserMachine for ClientEventDeserer {
             Self::DeseringTxtMsg(mut deser) => {
                 deser.finish_bytes_for_writing(n);
                 Self::DeseringTxtMsg(deser)
-            },
-            waiting => waiting,
+            }
+            waiting @ Self::GotStart(_) => waiting,
         }
     }
 
@@ -90,12 +85,12 @@ impl DeserMachine for ClientEventDeserer {
             Self::GotStart(n) => match n {
                 TEXT_MESSAGE => Ok(FsmResult::Continue(Self::DeseringTxtMsg(TxtDeserer::new()))),
                 QUIT => Ok(FsmResult::Done(EventToClient::ServerEnd)),
-                n => Err(EventReadError::InvalidKind(n))
-            }
+                n => Err(EventReadError::InvalidKind(n)),
+            },
             Self::DeseringTxtMsg(deser) => match deser.process()? {
                 FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringTxtMsg(deser))),
-                FsmResult::Done(msg) => Ok(FsmResult::Done(msg))
-            }
+                FsmResult::Done(msg) => Ok(FsmResult::Done(msg)),
+            },
         }
     }
 }
@@ -111,8 +106,8 @@ pub enum TxtDeserer {
     ReadingContent {
         name: String,
         content_bytes_left: usize,
-        content_so_far: Vec<u8>
-    }
+        content_so_far: Vec<u8>,
+    },
 }
 
 impl DeserMachine for TxtDeserer {
@@ -130,13 +125,12 @@ impl DeserMachine for TxtDeserer {
 
     fn wants_read(&mut self) -> DesiredInput {
         match self {
-            Self::DeseringNameLen(deser) => {
-                deser.wants_read()
-            }
-            Self::DeseringContentLen(_, deser) => {
-                deser.wants_read()
-            }
-            Self::ReadingName { name_bytes_left, content_bytes: _, name_so_far } => {
+            Self::DeseringNameLen(deser) | Self::DeseringContentLen(_, deser) => deser.wants_read(),
+            Self::ReadingName {
+                name_bytes_left,
+                content_bytes: _,
+                name_so_far,
+            } => {
                 if *name_bytes_left == 0 {
                     DesiredInput::ProcessMe
                 } else {
@@ -144,7 +138,11 @@ impl DeserMachine for TxtDeserer {
                     DesiredInput::Bytes(&mut name_so_far[start_index..])
                 }
             }
-            Self::ReadingContent { name: _, content_bytes_left, content_so_far } => {
+            Self::ReadingContent {
+                name: _,
+                content_bytes_left,
+                content_so_far,
+            } => {
                 if *content_bytes_left == 0 {
                     DesiredInput::ProcessMe
                 } else {
@@ -157,15 +155,21 @@ impl DeserMachine for TxtDeserer {
 
     fn give_starting_input(&mut self, (): Self::StartingInput) {}
 
-    fn finish_bytes_for_writing(&mut self, n: usize) { //TODO: consistency between this and integer for where logic is done? needs more experimentation with this style
+    fn finish_bytes_for_writing(&mut self, n: usize) {
+        //TODO: consistency between this and integer for where logic is done? needs more experimentation with this style
         match self {
-            Self::DeseringNameLen(deser) => deser.finish_bytes_for_writing(n),
-            Self::DeseringContentLen(_, deser) => deser.finish_bytes_for_writing(n),
-            Self::ReadingName { name_bytes_left, .. } => {
-                *name_bytes_left -= n;
+            Self::DeseringNameLen(deser) | Self::DeseringContentLen(_, deser) => {
+                deser.finish_bytes_for_writing(n)
             }
-            Self::ReadingContent { content_bytes_left, .. } => {
-                *content_bytes_left -= n;
+            Self::ReadingName {
+                name_bytes_left: left,
+                ..
+            }
+            | Self::ReadingContent {
+                content_bytes_left: left,
+                ..
+            } => {
+                *left -= n;
             }
         }
     }
@@ -173,18 +177,20 @@ impl DeserMachine for TxtDeserer {
     fn process(self) -> Result<FsmResult<Self, Self::Output>, Self::Error> {
         match self {
             Self::DeseringNameLen(deser) => match deser.process()? {
-                FsmResult::Continue(deser) => {
-                    Ok(FsmResult::Continue(Self::DeseringNameLen(deser)))
-                }
+                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringNameLen(deser))),
                 FsmResult::Done(int) => {
                     let len = int.try_into()?;
-                    Ok(FsmResult::Continue(Self::DeseringContentLen(len, Integer::deser_with_input(SignedState::Unsigned))))
+                    Ok(FsmResult::Continue(Self::DeseringContentLen(
+                        len,
+                        Integer::deser_with_input(SignedState::Unsigned),
+                    )))
                 }
-            }
+            },
             Self::DeseringContentLen(name_bytes_left, deser) => match deser.process()? {
-                FsmResult::Continue(deser) => {
-                    Ok(FsmResult::Continue(Self::DeseringContentLen(name_bytes_left, deser)))
-                }
+                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringContentLen(
+                    name_bytes_left,
+                    deser,
+                ))),
                 FsmResult::Done(int) => {
                     let content_bytes = int.try_into()?;
                     Ok(FsmResult::Continue(Self::ReadingName {
@@ -192,9 +198,13 @@ impl DeserMachine for TxtDeserer {
                         content_bytes,
                         name_so_far: vec![0; name_bytes_left],
                     }))
-                },
-            }
-            Self::ReadingName { name_bytes_left, content_bytes, name_so_far } => {
+                }
+            },
+            Self::ReadingName {
+                name_bytes_left,
+                content_bytes,
+                name_so_far,
+            } => {
                 if name_bytes_left == 0 {
                     let name = String::from_utf8(name_so_far)?;
                     Ok(FsmResult::Continue(Self::ReadingContent {
@@ -204,17 +214,20 @@ impl DeserMachine for TxtDeserer {
                     }))
                 } else {
                     Ok(FsmResult::Continue(Self::ReadingName {
-                        name_bytes_left, content_bytes, name_so_far
+                        name_bytes_left,
+                        content_bytes,
+                        name_so_far,
                     }))
                 }
             }
-            Self::ReadingContent { name, content_bytes_left, content_so_far } => {
+            Self::ReadingContent {
+                name,
+                content_bytes_left,
+                content_so_far,
+            } => {
                 if content_bytes_left == 0 {
                     let content = String::from_utf8(content_so_far)?;
-                    Ok(FsmResult::Done(EventToClient::TxtSent {
-                        name,
-                        content,
-                    })) //yipee!!!
+                    Ok(FsmResult::Done(EventToClient::TxtSent { name, content })) //yipee!!!
                 } else {
                     Ok(FsmResult::Continue(Self::ReadingContent {
                         name,

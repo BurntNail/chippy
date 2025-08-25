@@ -1,15 +1,15 @@
-use std::fmt::{Display, Formatter};
-use std::string::FromUtf8Error;
 use crate::integer::{Integer, IntegerDeserialiser, IntegerReadError, SignedState};
 use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult};
+use std::fmt::{Display, Formatter};
+use std::string::FromUtf8Error;
 
 #[derive(Debug)]
 pub enum StringDeserer {
     DeseringLen(IntegerDeserialiser),
     ReadingContent {
         bytes_left: usize,
-        content_so_far: Vec<u8>
-    }
+        content_so_far: Vec<u8>,
+    },
 }
 
 impl Deserable for String {
@@ -19,7 +19,7 @@ impl Deserable for String {
 #[derive(Debug)]
 pub enum StringReadError {
     Integer(IntegerReadError),
-    String(FromUtf8Error)
+    String(FromUtf8Error),
 }
 
 impl From<IntegerReadError> for StringReadError {
@@ -36,18 +36,18 @@ impl From<FromUtf8Error> for StringReadError {
 impl Display for StringReadError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            StringReadError::Integer(int) => write!(f, "Error reading length: {int}"),
-            StringReadError::String(string) => write!(f, "Error reading content as UTF-8: {string}"),
+            Self::Integer(int) => write!(f, "Error reading length: {int}"),
+            Self::String(string) => write!(f, "Error reading content as UTF-8: {string}"),
         }
     }
 }
 
 impl std::error::Error for StringReadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-         match self {
-             StringReadError::Integer(int) => Some(int),
-             StringReadError::String(string) => Some(string),
-         }
+        match self {
+            Self::Integer(int) => Some(int),
+            Self::String(string) => Some(string),
+        }
     }
 }
 
@@ -68,7 +68,8 @@ impl DeserMachine for StringDeserer {
         match self {
             Self::DeseringLen(deser) => deser.wants_read(),
             Self::ReadingContent {
-                bytes_left, content_so_far
+                bytes_left,
+                content_so_far,
             } => {
                 if *bytes_left == 0 {
                     DesiredInput::ProcessMe
@@ -102,8 +103,11 @@ impl DeserMachine for StringDeserer {
                         content_so_far: vec![0; bytes_left],
                     }))
                 }
-            }
-            Self::ReadingContent { bytes_left, content_so_far } => {
+            },
+            Self::ReadingContent {
+                bytes_left,
+                content_so_far,
+            } => {
                 if bytes_left == 0 {
                     let content = String::from_utf8(content_so_far)?;
                     Ok(FsmResult::Done(content))

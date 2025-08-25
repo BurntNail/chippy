@@ -1,10 +1,10 @@
-use std::fmt::{Display, Formatter};
-use std::string::FromUtf8Error;
 use crate::integer::IntegerReadError;
 use crate::ser_glue::string::StringReadError;
+use std::fmt::{Display, Formatter};
+use std::string::FromUtf8Error;
 
-pub mod server;
 pub mod client;
+pub mod server;
 
 const TEXT_MESSAGE: u8 = 1;
 const QUIT: u8 = 2;
@@ -36,10 +36,10 @@ impl From<StringReadError> for EventReadError {
 impl Display for EventReadError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            EventReadError::InvalidString(str) => write!(f, "Error reading UTF-8: {str}"),
-            EventReadError::Integer(int) => write!(f, "Error parsing integer value: {int}"),
-            EventReadError::InvalidKind(kind) => write!(f, "Invalid event type provided: {kind}"),
-            EventReadError::StringRead(str) => write!(f, "Error reading basic string: {str}"),
+            Self::InvalidString(str) => write!(f, "Error reading UTF-8: {str}"),
+            Self::Integer(int) => write!(f, "Error parsing integer value: {int}"),
+            Self::InvalidKind(kind) => write!(f, "Invalid event type provided: {kind}"),
+            Self::StringRead(str) => write!(f, "Error reading basic string: {str}"),
         }
     }
 }
@@ -47,10 +47,10 @@ impl Display for EventReadError {
 impl std::error::Error for EventReadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            EventReadError::InvalidString(str) => Some(str),
-            EventReadError::Integer(int) => Some(int),
-            EventReadError::StringRead(str) => Some(str),
-            EventReadError::InvalidKind(_) => None,
+            Self::InvalidString(str) => Some(str),
+            Self::Integer(int) => Some(int),
+            Self::StringRead(str) => Some(str),
+            Self::InvalidKind(_) => None,
         }
     }
 }
