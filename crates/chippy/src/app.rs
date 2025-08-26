@@ -1,3 +1,4 @@
+use std::net::ToSocketAddrs;
 use eframe::{App, Frame};
 use egui::Context;
 use fishandchippy::events::client::EventToClient;
@@ -10,17 +11,17 @@ pub struct ChippyApp {
 }
 
 impl ChippyApp {
-    pub fn new () -> Self {
+    pub fn new (server: impl ToSocketAddrs) -> Self {
         Self {
             send_msg_buffer: String::new(),
             msgs_so_far: Vec::new(),
-            io: IOThread::new("localhost:8080"),
+            io: IOThread::new(server),
         }
     }
 }
 
 impl App for ChippyApp {
-    fn update(&mut self, ctx: &Context, frame: &mut Frame) {
+    fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         egui::TopBottomPanel::bottom("send msg").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.text_edit_singleline(&mut self.send_msg_buffer);

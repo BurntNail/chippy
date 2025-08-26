@@ -4,8 +4,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryIter};
 use std::thread::JoinHandle;
-use egui::Atom;
-use egui::debug_text::print;
 use fishandchippy::events::client::EventToClient;
 use fishandchippy::events::server::EventToServer;
 use fishandchippy::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};

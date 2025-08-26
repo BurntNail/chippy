@@ -595,6 +595,8 @@ dependencies = [
  "eframe",
  "egui",
  "fishandchippy",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
