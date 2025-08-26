@@ -13,6 +13,8 @@ FROM rust:${RUST_VERSION}-slim-bullseye AS build
 ARG APP_NAME
 WORKDIR /app
 
+RUN apt update && apt install -y pkg-config libssl-dev
+
 # Build the application.
 # Leverage a cache mount to /usr/local/cargo/registry/
 # for downloaded dependencies and a cache mount to /app/target/ for
@@ -45,6 +47,10 @@ EOF
 # (e.g.,    debian@sha256:ac707220fbd7b67fc19b112cee8170b41a9e97f703f588b2cdbbcdcecdd8af57).
 FROM debian:bullseye-slim AS final
 LABEL org.opencontainers.image.source=https://github.com/BurntNail/chippy
+
+RUN apt update && apt install -y --no-install-recommends ca-certificates
+RUN update-ca-certificates
+RUN rm -rf /var/lib/apt && rm -rf /var/lib/dpkg && rm -rf /var/lib/cache && rm -rf /var/lib/log
 
 # Create a non-privileged user that the app will run under.
 # See https://docs.docker.com/develop/develop-images/dockerfile_best-practices/   #user
