@@ -1,11 +1,15 @@
-use crate::events::{EventReadError, TEXT_MESSAGE};
-use crate::integer::Integer;
-use crate::ser_glue::string::StringDeserer;
+use crate::events::{EventReadError, INTRODUCTION, TEXT_MESSAGE};
+use crate::ser_glue::string::{BasicStringSer, StringDeserer};
 use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
 #[derive(Clone, Debug)]
 pub enum EventToServer {
-    SendMessage(String),
+    SendMessage {
+        msg: String
+    },
+    Introduction {
+        name: String,
+    }
 }
 
 impl Serable for EventToServer {
@@ -13,11 +17,13 @@ impl Serable for EventToServer {
 
     fn ser_into(&self, into: &mut Vec<u8>) -> Self::ExtraOutput {
         match self {
-            Self::SendMessage(msg) => {
+            Self::SendMessage {msg} => {
                 into.push(TEXT_MESSAGE);
-
-                Integer::from(msg.len()).ser_into(into); //can ignore signed state as is always unsigned
-                into.extend_from_slice(msg.as_bytes());
+                BasicStringSer(msg).ser_into(into);
+            }
+            Self::Introduction {name} => {
+                into.push(INTRODUCTION);
+                BasicStringSer(name).ser_into(into);
             }
         }
     }
@@ -32,6 +38,7 @@ pub enum ServerEventDeserer {
     Start(u8),
     GotStart(u8),
     DeseringTxtMsg(StringDeserer),
+    DeseringIntroduction(StringDeserer),
 }
 
 impl DeserMachine for ServerEventDeserer {
@@ -52,6 +59,7 @@ impl DeserMachine for ServerEventDeserer {
             Self::Start(space) => DesiredInput::Byte(space),
             Self::GotStart(_start) => DesiredInput::ProcessMe,
             Self::DeseringTxtMsg(txt_deser) => txt_deser.wants_read(),
+            Self::DeseringIntroduction(intro_deser) => intro_deser.wants_read(),
         }
     }
 
@@ -70,6 +78,10 @@ impl DeserMachine for ServerEventDeserer {
                 deser.finish_bytes_for_writing(n);
                 Self::DeseringTxtMsg(deser)
             }
+            Self::DeseringIntroduction(mut deser) => {
+                deser.finish_bytes_for_writing(n);
+                Self::DeseringIntroduction(deser)
+            }
             waiting @ Self::GotStart(_) => waiting,
         }
     }
@@ -79,11 +91,16 @@ impl DeserMachine for ServerEventDeserer {
             Self::Start(n) => Ok(FsmResult::Continue(Self::Start(n))),
             Self::GotStart(n) => match n {
                 TEXT_MESSAGE => Ok(FsmResult::Continue(Self::DeseringTxtMsg(String::deser()))),
+                INTRODUCTION => Ok(FsmResult::Continue(Self::DeseringIntroduction(String::deser()))),
                 n => Err(EventReadError::InvalidKind(n)),
             },
             Self::DeseringTxtMsg(deser) => match deser.process()? {
                 FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringTxtMsg(deser))),
-                FsmResult::Done(msg) => Ok(FsmResult::Done(EventToServer::SendMessage(msg))),
+                FsmResult::Done(msg) => Ok(FsmResult::Done(EventToServer::SendMessage{msg})),
+            },
+            Self::DeseringIntroduction(deser) => match deser.process()? {
+                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringIntroduction(deser))),
+                FsmResult::Done(name) => Ok(FsmResult::Done(EventToServer::Introduction {name})),
             },
         }
     }

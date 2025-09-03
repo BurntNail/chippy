@@ -1,5 +1,5 @@
 use crate::integer::{Integer, IntegerDeserialiser, IntegerReadError, SignedState};
-use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult};
+use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 use std::fmt::{Display, Formatter};
 use std::string::FromUtf8Error;
 
@@ -119,5 +119,15 @@ impl DeserMachine for StringDeserer {
                 }
             }
         }
+    }
+}
+
+pub struct BasicStringSer<'a>(pub &'a String);
+impl Serable for BasicStringSer<'_> {
+    type ExtraOutput = ();
+
+    fn ser_into(&self, into: &mut Vec<u8>) -> Self::ExtraOutput {
+        Integer::from(self.0.len()).ser_into(into); //can ignore signed state as is always unsigned
+        into.extend_from_slice(self.0.as_bytes());
     }
 }

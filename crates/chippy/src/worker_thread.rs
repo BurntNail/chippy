@@ -7,6 +7,14 @@ pub struct IOThread {
     tx: WsSender,
     rx: WsReceiver,
     waiting_for_conn: Option<Vec<EventToServer>>,
+    intro_state: IntroductionState,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum IntroductionState {
+    Needed,
+    Sent,
+    Confirmed,
 }
 
 impl IOThread {
@@ -16,6 +24,7 @@ impl IOThread {
         Ok(Self {
             tx, rx,
             waiting_for_conn: Some(vec![]),
+            intro_state: IntroductionState::Needed,
         })
     }
     
@@ -27,10 +36,19 @@ impl IOThread {
         //TODO: quit logic
     }
     
-    pub fn send_msg (&mut self, msg: String) {
-        self.send_req(EventToServer::SendMessage(msg));
+    pub fn intro_state (&self) -> IntroductionState {
+        self.intro_state
     }
-
+    pub fn send_introduction (&mut self, name: String) {
+        if matches!(self.intro_state, IntroductionState::Needed) {
+            self.intro_state = IntroductionState::Sent;
+            self.send_req(EventToServer::Introduction {name});
+        }
+    }
+    
+    pub fn send_msg (&mut self, msg: String) {
+        self.send_req(EventToServer::SendMessage {msg});
+    }
     fn send_req (&mut self, req: EventToServer) {
         if let Some(list) = self.waiting_for_conn.as_mut() {
             list.push(req);
@@ -91,6 +109,10 @@ impl IOThread {
                                         deserer = match deserer.process()? {
                                             FsmResult::Continue(cont) => cont,
                                             FsmResult::Done(evt) => {
+                                                if matches!(evt, EventToClient::Introduced) {
+                                                    self.intro_state = IntroductionState::Confirmed;
+                                                }
+                                                
                                                 evts.push(evt);
                                                 EventToClient::deser()
                                             }
