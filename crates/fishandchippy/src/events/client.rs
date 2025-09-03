@@ -1,10 +1,11 @@
-use crate::events::{EventReadError, TEXT_MESSAGE};
+use crate::events::{EventReadError, INTRODUCTION, TEXT_MESSAGE};
 use crate::integer::{Integer, IntegerDeserialiser, SignedState};
 use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
 #[derive(Clone, Debug)]
 pub enum EventToClient {
     TxtSent { name: String, content: String },
+    Introduced,
 }
 
 impl Serable for EventToClient {
@@ -20,6 +21,9 @@ impl Serable for EventToClient {
 
                 into.extend_from_slice(name.as_bytes());
                 into.extend_from_slice(content.as_bytes());
+            }
+            Self::Introduced => {
+                into.push(INTRODUCTION);
             }
         }
     }
@@ -80,6 +84,7 @@ impl DeserMachine for ClientEventDeserer {
             Self::Start(n) => Ok(FsmResult::Continue(Self::Start(n))),
             Self::GotStart(n) => match n {
                 TEXT_MESSAGE => Ok(FsmResult::Continue(Self::DeseringTxtMsg(TxtDeserer::new()))),
+                INTRODUCTION => Ok(FsmResult::Done(EventToClient::Introduced)),
                 n => Err(EventReadError::InvalidKind(n)),
             },
             Self::DeseringTxtMsg(deser) => match deser.process()? {

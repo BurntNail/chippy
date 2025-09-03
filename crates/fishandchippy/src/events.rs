@@ -7,6 +7,7 @@ pub mod client;
 pub mod server;
 
 const TEXT_MESSAGE: u8 = 1;
+const INTRODUCTION: u8 = 2;
 
 #[derive(Debug)]
 pub enum EventReadError {

@@ -1,6 +1,7 @@
 #![warn(clippy::all, clippy::nursery, clippy::pedantic)]
 
 mod conn;
+mod client;
 
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -14,12 +15,11 @@ async fn main() -> color_eyre::Result<()> {
     let listener = TcpListener::bind("0.0.0.0:8080").await?;
 
     while let Ok((stream, addr)) = listener.accept().await {
-        let name = addr.to_string();
         let send_event = send_event.clone();
         let recv_event = send_event.subscribe();
         
         tokio::task::spawn(async move {
-            if let Err(e) = handle_connection(name, addr, stream, send_event, recv_event).await {
+            if let Err(e) = handle_connection(addr, stream, send_event, recv_event).await {
                 eprintln!("Error serving conn: {e}");
             }
         });
