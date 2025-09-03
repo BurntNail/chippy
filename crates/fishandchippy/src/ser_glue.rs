@@ -50,7 +50,7 @@ pub trait DeserMachine: Sized {
 
     fn new() -> Self;
     fn new_with_starting_input(input: Self::StartingInput) -> Self;
-    fn wants_read(&mut self) -> DesiredInput;
+    fn wants_read(&mut self) -> DesiredInput<'_>;
     fn give_starting_input(&mut self, magic: Self::StartingInput);
     fn finish_bytes_for_writing(&mut self, n: usize);
     #[allow(clippy::missing_errors_doc)] //you provide it lol i have no clue what the problem could be

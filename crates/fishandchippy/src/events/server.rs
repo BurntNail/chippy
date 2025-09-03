@@ -1,4 +1,4 @@
-use crate::events::{EventReadError, QUIT, TEXT_MESSAGE};
+use crate::events::{EventReadError, TEXT_MESSAGE};
 use crate::integer::Integer;
 use crate::ser_glue::string::StringDeserer;
 use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
@@ -6,7 +6,6 @@ use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable}
 #[derive(Clone, Debug)]
 pub enum EventToServer {
     SendMessage(String),
-    Quit,
 }
 
 impl Serable for EventToServer {
@@ -19,9 +18,6 @@ impl Serable for EventToServer {
 
                 Integer::from(msg.len()).ser_into(into); //can ignore signed state as is always unsigned
                 into.extend_from_slice(msg.as_bytes());
-            }
-            Self::Quit => {
-                into.push(QUIT);
             }
         }
     }
@@ -51,7 +47,7 @@ impl DeserMachine for ServerEventDeserer {
         Self::new()
     }
 
-    fn wants_read(&mut self) -> DesiredInput {
+    fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
             Self::Start(space) => DesiredInput::Byte(space),
             Self::GotStart(_start) => DesiredInput::ProcessMe,
@@ -83,7 +79,6 @@ impl DeserMachine for ServerEventDeserer {
             Self::Start(n) => Ok(FsmResult::Continue(Self::Start(n))),
             Self::GotStart(n) => match n {
                 TEXT_MESSAGE => Ok(FsmResult::Continue(Self::DeseringTxtMsg(String::deser()))),
-                QUIT => Ok(FsmResult::Done(EventToServer::Quit)),
                 n => Err(EventReadError::InvalidKind(n)),
             },
             Self::DeseringTxtMsg(deser) => match deser.process()? {

@@ -1,131 +1,115 @@
-use std::io::{ErrorKind, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender, TryIter};
-use std::thread::JoinHandle;
-use fishandchippy::events::client::EventToClient;
+use ewebsock::{Options, WsEvent, WsMessage, WsReceiver, WsSender};
+use fishandchippy::events::client::{ClientEventDeserer, EventToClient};
 use fishandchippy::events::server::EventToServer;
 use fishandchippy::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
-pub enum IORequest {
-    SendMsg(String),
-    Quit
-}
-
 pub struct IOThread {
-    request_sender: Sender<IORequest>,
-    result_receiver: Receiver<EventToClient>,
-    read_handle: JoinHandle<()>,
-    write_handle: JoinHandle<()>,
+    tx: WsSender,
+    rx: WsReceiver,
+    waiting_for_conn: Option<Vec<EventToServer>>,
 }
 
 impl IOThread {
-    pub fn new (server: impl ToSocketAddrs) -> Self {
-        let (request_tx, request_rx) = channel();
-        let (result_tx, result_rx) = channel();
-        
-        let stop = Arc::new(AtomicBool::new(false));
-        let set_stop = stop.clone();
-        
-        let mut read_stream = TcpStream::connect(server).unwrap();
-        let mut write_stream = read_stream.try_clone().unwrap();
-        
-        let read_handle = std::thread::spawn(move || {
-            read_stream.set_nonblocking(true).unwrap(); //FIXME: unwrap
-            let mut parser = EventToClient::deser();
-            let nonblocking_or_panic = |stream: &mut TcpStream, slice: &mut [u8]| {
-                match stream.read(slice) {
-                    Ok(n) => Some(n),
-                    Err(e) => if e.kind() == ErrorKind::WouldBlock {
-                        None
-                    } else {
-                        panic!("{e:?}"); //FIXME: panic
-                    }
-                }
-            };
+    pub fn new (server: impl Into<String>) -> color_eyre::Result<Self> {
+        let (tx, rx) = ewebsock::connect(server, Options::default()).map_err(string_to_eyre)?;
 
-            loop {
-                if stop.load(Ordering::SeqCst) {
-                    break;
-                }
-                
-                match parser.wants_read() {
-                    DesiredInput::Byte(space) => {
-                        let mut arr = [0; 1];
-                        if let Some(n) = nonblocking_or_panic(&mut read_stream, &mut arr) {
-                            if n == 1 {
-                                *space = arr[0];
-                            }
-
-                            parser.finish_bytes_for_writing(n);
-                        }
-                    }
-                    DesiredInput::Bytes(space) => {
-                        if let Some(n) = nonblocking_or_panic(&mut read_stream, space) {
-                            parser.finish_bytes_for_writing(n);
-                        }
-                    }
-                    DesiredInput::ProcessMe => {
-                        //FIXME: unwrap
-                        parser = match parser.process().unwrap() {
-                            FsmResult::Continue(parser) => parser,
-                            FsmResult::Done(result) => {
-                                println!("i did a thing :)");
-                                let _ = result_tx.send(result).unwrap();
-                                EventToClient::deser()
-                            }
-                        }
-                    }
-                    DesiredInput::Start => {
-                        unreachable!()
-                    }
-                }
-            }
-        });
-        
-        let write_handle = std::thread::spawn(move || {
-            let mut msg_buf = vec![];
-
-            'outer: loop {
-                for request in request_rx.try_iter() {
-                    match request {
-                        IORequest::SendMsg(msg) => {
-                            msg_buf.clear();
-                            EventToServer::SendMessage(msg).ser_into(&mut msg_buf);
-                            write_stream.write_all(&msg_buf).unwrap();
-                        }
-                        IORequest::Quit => {
-                            msg_buf.clear();
-                            EventToServer::Quit.ser_into(&mut msg_buf);
-                            write_stream.write_all(&msg_buf).unwrap();
-
-                            set_stop.store(true, Ordering::SeqCst);
-                            break 'outer;
-                        }
-                    }
-                }
-            }
-        });
-        
-        
-        Self {
-            request_sender: request_tx,
-            result_receiver: result_rx,
-            read_handle,
-            write_handle,
+        Ok(Self {
+            tx, rx,
+            waiting_for_conn: Some(vec![]),
+        })
+    }
+    
+    pub fn quit (&mut self, needs_to_close_socket: bool) {
+        if needs_to_close_socket {
+            self.tx.close();
         }
+        self.waiting_for_conn = Some(vec![]);
+        //TODO: quit logic
     }
     
-    pub fn quit (&self) {
-        self.request_sender.send(IORequest::Quit).unwrap();
+    pub fn send_msg (&mut self, msg: String) {
+        self.send_req(EventToServer::SendMessage(msg));
+    }
+
+    fn send_req (&mut self, req: EventToServer) {
+        if let Some(list) = self.waiting_for_conn.as_mut() {
+            list.push(req);
+            return;
+        }
+
+        self.tx.send(WsMessage::Binary(req.ser().1));
     }
     
-    pub fn send_msg (&self, msg: String) {
-        self.request_sender.send(IORequest::SendMsg(msg)).unwrap();
-    } 
-    
-    pub fn try_iter (&self) -> TryIter<'_, EventToClient> {
-        self.result_receiver.try_iter()
+    pub fn get_events(&mut self) -> color_eyre::Result<impl IntoIterator<Item = EventToClient>> {
+        let mut evts = vec![];
+
+        while let Some(to_be_processed) = self.rx.try_recv() {
+            match to_be_processed {
+                WsEvent::Opened => {
+                    info!("Connection opened :)");
+                    for msg in self.waiting_for_conn.take().unwrap_or_default() {
+                        self.tx.send(WsMessage::Binary(msg.ser().1));
+                    }
+                }
+                WsEvent::Error(uhoh) => {
+                    return Err(string_to_eyre(uhoh));
+                }
+                WsEvent::Closed => {
+                    self.quit(false);
+                }
+                WsEvent::Message(msg) => {
+                    match msg {
+                        WsMessage::Binary(binary) => {
+                            let mut binary = binary.into_iter().peekable();
+                            let mut deserer = EventToClient::deser();
+
+                            loop {
+                                if matches!(deserer, ClientEventDeserer::Start(_)) && binary.peek().is_none() {
+                                    break;
+                                }
+
+                                match deserer.wants_read() {
+                                    DesiredInput::Byte(space) => {
+                                        if let Some(byte) = binary.next() {
+                                            *space = byte;
+                                            deserer.finish_bytes_for_writing(1);
+                                        }
+                                    }
+                                    DesiredInput::Bytes(space) => {
+                                        let mut n = 0;
+                                        for i in 0..space.len() {
+                                            let Some(byte) = binary.next() else {
+                                                break;
+                                            };
+                                            space[i] = byte;
+                                            
+                                            n += 1;
+                                        }
+                                        deserer.finish_bytes_for_writing(n);
+                                    }
+                                    DesiredInput::ProcessMe => {
+                                        deserer = match deserer.process()? {
+                                            FsmResult::Continue(cont) => cont,
+                                            FsmResult::Done(evt) => {
+                                                evts.push(evt);
+                                                EventToClient::deser()
+                                            }
+                                        }
+                                    }
+                                    DesiredInput::Start => unreachable!()
+                                }
+                            }
+                        }
+                        unexpected => warn!("Received unexpected message: {unexpected:?}"),
+                    }
+                }
+            }
+        }
+
+        Ok(evts)
     }
+}
+
+pub fn string_to_eyre (s: String) -> color_eyre::Report {
+    color_eyre::Report::msg(s)
 }

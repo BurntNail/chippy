@@ -402,7 +402,7 @@ impl DeserMachine for IntegerDeserialiser {
         }
     }
 
-    fn wants_read(&mut self) -> DesiredInput {
+    fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
             Self::Start => DesiredInput::Start,
             Self::GotSignedState {

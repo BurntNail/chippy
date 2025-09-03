@@ -64,7 +64,7 @@ impl DeserMachine for StringDeserer {
         Self::new()
     }
 
-    fn wants_read(&mut self) -> DesiredInput {
+    fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
             Self::DeseringLen(deser) => deser.wants_read(),
             Self::ReadingContent {

@@ -6,32 +6,22 @@ use crate::app::ChippyApp;
 mod app;
 mod worker_thread;
 
+#[macro_use]
+extern crate log;
+
 fn build_app (_cc: &CreationContext) -> Result<Box<dyn App>, Box<dyn std::error::Error + Send + Sync>> {
-    let server = if cfg!(target_arch = "wasm32") {
-        "fishand.fly.dev:8080"
-    } else {
-        "localhost:8080"
-    };
-    
-    Ok(Box::new(ChippyApp::new(server)))
-}
+    let server = "ws://localhost:8080".to_string();
 
-#[cfg(not(target_arch = "wasm32"))]
-fn main() {
-    let options = eframe::NativeOptions::default();
-    
-    color_eyre::install().expect("unable to install colour eyre :(");
-
-    eframe::run_native(
-        "Chippy",
-        options,
-        Box::new(build_app)
-    ).unwrap()
+    Ok(Box::new(ChippyApp::new(server)?))
 }
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
     use eframe::wasm_bindgen::JsCast as _;
+
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    console_log::init_with_level(log::Level::Trace).expect("Failed to enable logging");
+
     let web_options = eframe::WebOptions::default();
 
     wasm_bindgen_futures::spawn_local(async {

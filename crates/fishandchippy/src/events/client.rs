@@ -1,11 +1,10 @@
-use crate::events::{EventReadError, QUIT, TEXT_MESSAGE};
+use crate::events::{EventReadError, TEXT_MESSAGE};
 use crate::integer::{Integer, IntegerDeserialiser, SignedState};
 use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
 #[derive(Clone, Debug)]
 pub enum EventToClient {
     TxtSent { name: String, content: String },
-    ServerEnd,
 }
 
 impl Serable for EventToClient {
@@ -21,9 +20,6 @@ impl Serable for EventToClient {
 
                 into.extend_from_slice(name.as_bytes());
                 into.extend_from_slice(content.as_bytes());
-            }
-            Self::ServerEnd => {
-                into.push(QUIT);
             }
         }
     }
@@ -52,7 +48,7 @@ impl DeserMachine for ClientEventDeserer {
         Self::new()
     }
 
-    fn wants_read(&mut self) -> DesiredInput {
+    fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
             Self::Start(space) => DesiredInput::Byte(space),
             Self::GotStart(_start) => DesiredInput::ProcessMe,
@@ -84,7 +80,6 @@ impl DeserMachine for ClientEventDeserer {
             Self::Start(n) => Ok(FsmResult::Continue(Self::Start(n))),
             Self::GotStart(n) => match n {
                 TEXT_MESSAGE => Ok(FsmResult::Continue(Self::DeseringTxtMsg(TxtDeserer::new()))),
-                QUIT => Ok(FsmResult::Done(EventToClient::ServerEnd)),
                 n => Err(EventReadError::InvalidKind(n)),
             },
             Self::DeseringTxtMsg(deser) => match deser.process()? {
@@ -123,7 +118,7 @@ impl DeserMachine for TxtDeserer {
         Self::new()
     }
 
-    fn wants_read(&mut self) -> DesiredInput {
+    fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
             Self::DeseringNameLen(deser) | Self::DeseringContentLen(_, deser) => deser.wants_read(),
             Self::ReadingName {
@@ -159,7 +154,7 @@ impl DeserMachine for TxtDeserer {
         //TODO: consistency between this and integer for where logic is done? needs more experimentation with this style
         match self {
             Self::DeseringNameLen(deser) | Self::DeseringContentLen(_, deser) => {
-                deser.finish_bytes_for_writing(n)
+                deser.finish_bytes_for_writing(n);
             }
             Self::ReadingName {
                 name_bytes_left: left,
