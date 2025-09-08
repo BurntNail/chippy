@@ -4,76 +4,115 @@ use fishandchippy::events::server::EventToServer;
 use fishandchippy::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
 pub struct IOThread {
-    tx: WsSender,
-    rx: WsReceiver,
-    waiting_for_conn: Option<Vec<EventToServer>>,
-    intro_state: IntroductionState,
+    state: IOThreadState
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum IntroductionState {
-    Needed,
-    Sent,
-    Confirmed,
+enum IOThreadState { 
+    Disconnected, 
+    TryingToConnect {
+        tx: WsSender,
+        rx: WsReceiver,
+        name: String
+    },
+    WaitingOnAcknowledgement {
+        tx: WsSender,
+        rx: WsReceiver
+    },
+    Connected {
+        tx: WsSender,
+        rx: WsReceiver
+    }
 }
 
 impl IOThread {
-    pub fn new (server: impl Into<String>) -> color_eyre::Result<Self> {
+    fn get_tx_rx (&mut self) -> Option<(&mut WsSender, &mut WsReceiver)> {
+        match &mut self.state {
+            IOThreadState::Disconnected => None,
+            IOThreadState::TryingToConnect {tx, rx, ..} | IOThreadState::WaitingOnAcknowledgement {tx, rx} | IOThreadState::Connected {tx, rx, ..} => Some((tx, rx))
+        }
+    }
+    
+    pub fn new () -> Self {
+        Self {
+            state: IOThreadState::Disconnected
+        }
+    }
+    
+    pub fn is_disconnected (&self) -> bool {
+        matches!(self.state, IOThreadState::Disconnected)
+    }
+    pub fn is_waiting(&self) -> bool {
+        matches!(self.state, IOThreadState::WaitingOnAcknowledgement {..} | IOThreadState::TryingToConnect {..})
+    }
+    pub fn is_connected (&self) -> bool {
+        matches!(self.state, IOThreadState::Connected {..})
+    }
+    
+    pub fn connect (&mut self, server: String, name: String) -> color_eyre::Result<()> {
+        self.quit(true);
+        
         let (tx, rx) = ewebsock::connect(server, Options::default()).map_err(string_to_eyre)?;
-
-        Ok(Self {
-            tx, rx,
-            waiting_for_conn: Some(vec![]),
-            intro_state: IntroductionState::Needed,
-        })
+       
+        self.state = IOThreadState::TryingToConnect {
+            tx,
+            rx,
+            name
+        };
+        
+        Ok(())
     }
     
     pub fn quit (&mut self, needs_to_close_socket: bool) {
         if needs_to_close_socket {
-            self.tx.close();
+            let tx_and_rx = match std::mem::replace(&mut self.state, IOThreadState::Disconnected) {
+                IOThreadState::Disconnected => None,
+                IOThreadState::TryingToConnect {tx, rx, ..} => Some((tx, rx)),
+                IOThreadState::WaitingOnAcknowledgement { tx, rx } => Some((tx, rx)),
+                IOThreadState::Connected { tx, rx, .. } => Some((tx, rx)),
+            };
+            if let Some((mut tx, _rx)) = tx_and_rx {
+                //_rx just in case i need to do anything with it ever
+                tx.close();
+            }
+        } else {
+            self.state = IOThreadState::Disconnected;
         }
-        self.waiting_for_conn = Some(vec![]);
         //TODO: quit logic
     }
     
-    pub fn intro_state (&self) -> IntroductionState {
-        self.intro_state
-    }
-    pub fn send_introduction (&mut self, name: String) {
-        if matches!(self.intro_state, IntroductionState::Needed) {
-            self.intro_state = IntroductionState::Sent;
-            self.send_req(EventToServer::Introduction {name});
+    pub fn send_req (&mut self, req: EventToServer) {
+        if self.is_connected() && let Some((tx, _rx)) = self.get_tx_rx() {
+            tx.send(WsMessage::Binary(req.ser().1));
         }
     }
     
-    pub fn send_msg (&mut self, msg: String) {
-        self.send_req(EventToServer::SendMessage {msg});
-    }
-    fn send_req (&mut self, req: EventToServer) {
-        if let Some(list) = self.waiting_for_conn.as_mut() {
-            list.push(req);
-            return;
-        }
+    pub fn poll_and_get_events(&mut self) -> color_eyre::Result<impl IntoIterator<Item = EventToClient>> {
+        let Some((_tx, mut rx)) = self.get_tx_rx() else {
+            return Ok(vec![]);
+        };
 
-        self.tx.send(WsMessage::Binary(req.ser().1));
-    }
-    
-    pub fn get_events(&mut self) -> color_eyre::Result<impl IntoIterator<Item = EventToClient>> {
         let mut evts = vec![];
 
-        while let Some(to_be_processed) = self.rx.try_recv() {
+        while let Some(to_be_processed) = rx.try_recv() {
             match to_be_processed {
                 WsEvent::Opened => {
                     info!("Connection opened :)");
-                    for msg in self.waiting_for_conn.take().unwrap_or_default() {
-                        self.tx.send(WsMessage::Binary(msg.ser().1));
-                    }
+                    let IOThreadState::TryingToConnect {tx: mut new_tx, rx: new_rx, name} = std::mem::replace(&mut self.state, IOThreadState::Disconnected) else {
+                        unreachable!();
+                    };
+                    
+                    new_tx.send(WsMessage::Binary(EventToServer::Introduction {name}.ser().1));
+                    self.state = IOThreadState::WaitingOnAcknowledgement {tx: new_tx, rx: new_rx};
+
+                    let (_, new_new_rx) = self.get_tx_rx().unwrap();
+                    rx = new_new_rx;
                 }
                 WsEvent::Error(uhoh) => {
                     return Err(string_to_eyre(uhoh));
                 }
                 WsEvent::Closed => {
                     self.quit(false);
+                    return Ok(evts);
                 }
                 WsEvent::Message(msg) => {
                     match msg {
@@ -100,7 +139,7 @@ impl IOThread {
                                                 break;
                                             };
                                             space[i] = byte;
-                                            
+
                                             n += 1;
                                         }
                                         deserer.finish_bytes_for_writing(n);
@@ -109,10 +148,18 @@ impl IOThread {
                                         deserer = match deserer.process()? {
                                             FsmResult::Continue(cont) => cont,
                                             FsmResult::Done(evt) => {
-                                                if matches!(evt, EventToClient::Introduced) {
-                                                    self.intro_state = IntroductionState::Confirmed;
-                                                }
                                                 
+                                                if matches!(evt, EventToClient::Introduced) {
+                                                    info!("Acknowledgement received, joining server");
+                                                    let IOThreadState::WaitingOnAcknowledgement {tx: new_tx, rx: new_rx} = std::mem::replace(&mut self.state, IOThreadState::Disconnected) else {
+                                                        unreachable!()
+                                                    };
+                                                    self.state = IOThreadState::Connected {tx: new_tx, rx: new_rx};
+
+                                                    let (_, new_new_rx) = self.get_tx_rx().unwrap();
+                                                    rx = new_new_rx;
+                                                }
+
                                                 evts.push(evt);
                                                 EventToClient::deser()
                                             }

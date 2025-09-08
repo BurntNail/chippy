@@ -10,9 +10,7 @@ mod worker_thread;
 extern crate log;
 
 fn build_app (_cc: &CreationContext) -> Result<Box<dyn App>, Box<dyn std::error::Error + Send + Sync>> {
-    let server = "ws://localhost:8080".to_string();
-
-    Ok(Box::new(ChippyApp::new(server)?))
+    Ok(Box::new(ChippyApp::new()?))
 }
 
 #[cfg(target_arch = "wasm32")]
