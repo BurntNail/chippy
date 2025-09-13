@@ -1,12 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use crate::worker_thread::IOThread;
 use eframe::{App, Frame};
 use egui::{Context, TextBuffer};
-use uuid::Uuid;
 use fishandchippy::events::client::EventToClient;
 use fishandchippy::events::server::EventToServer;
 use fishandchippy::game_types::player::Player;
 use fishandchippy::game_types::pot::Pot;
-use crate::worker_thread::{IOThread};
+use std::collections::{HashMap, HashSet};
+use uuid::Uuid;
 
 pub struct ChippyApp {
     io: IOThread,
@@ -16,7 +16,7 @@ pub struct ChippyApp {
 //TODO: move this to the event enum?
 enum MessageSender {
     Player(Uuid),
-    Admin
+    Admin,
 }
 
 enum ChippyAppState {
@@ -25,7 +25,7 @@ enum ChippyAppState {
         server_buffer: String,
     },
     ErrorHappened {
-        error: String
+        error: String,
     },
     LoadedIn {
         send_msg_buffer: String,
@@ -33,7 +33,7 @@ enum ChippyAppState {
         our_uuid: Uuid,
         players: HashMap<Uuid, Player>,
         pot: Pot,
-    }
+    },
 }
 
 impl Default for ChippyAppState {
@@ -46,27 +46,32 @@ impl Default for ChippyAppState {
 }
 
 impl ChippyApp {
-    pub fn new () -> color_eyre::Result<Self> {
+    pub fn new() -> color_eyre::Result<Self> {
         Ok(Self {
             io: IOThread::new(),
             state: ChippyAppState::default(),
         })
     }
 
-    fn get_my_player_data (&self) -> Option<&Player> {
-        if let ChippyAppState::LoadedIn {players, our_uuid, ..} = &self.state {
+    fn get_my_player_data(&self) -> Option<&Player> {
+        if let ChippyAppState::LoadedIn {
+            players, our_uuid, ..
+        } = &self.state
+        {
             players.get(our_uuid)
         } else {
             None
         }
     }
 
-    fn game_update (&mut self) {
+    fn game_update(&mut self) {
         let mut reqs_to_send = HashSet::new();
         let events = match self.io.poll_and_get_events() {
             Ok(events) => events,
             Err(e) => {
-                self.state = ChippyAppState::ErrorHappened {error: e.to_string()};
+                self.state = ChippyAppState::ErrorHappened {
+                    error: e.to_string(),
+                };
                 return;
             }
         };
@@ -74,15 +79,22 @@ impl ChippyApp {
         for result in events {
             match result {
                 EventToClient::TxtSent(uuid, content) => {
-                    if let ChippyAppState::LoadedIn { msgs_so_far, players, .. } = &mut self.state {
+                    if let ChippyAppState::LoadedIn {
+                        msgs_so_far,
+                        players,
+                        ..
+                    } = &mut self.state
+                    {
                         msgs_so_far.push((MessageSender::Player(uuid), content));
                         if !players.contains_key(&uuid) {
                             reqs_to_send.insert(EventToServer::GetSpecificPlayer(uuid));
                         }
                     }
                 }
-                EventToClient::AdminMsg(content) => if let ChippyAppState::LoadedIn {msgs_so_far, ..} = &mut self.state {
-                    msgs_so_far.push((MessageSender::Admin, content));
+                EventToClient::AdminMsg(content) => {
+                    if let ChippyAppState::LoadedIn { msgs_so_far, .. } = &mut self.state {
+                        msgs_so_far.push((MessageSender::Admin, content));
+                    }
                 }
                 EventToClient::Introduced(uuid) => {
                     info!("User state now loaded");
@@ -107,12 +119,12 @@ impl ChippyApp {
                     }
                 }
                 EventToClient::AllPlayers(new_players) => {
-                    if let ChippyAppState::LoadedIn {players, ..} = &mut self.state {
+                    if let ChippyAppState::LoadedIn { players, .. } = &mut self.state {
                         *players = new_players;
                     }
                 }
                 EventToClient::SpecificPlayer(uuid, player) => {
-                    if let ChippyAppState::LoadedIn {players, ..} = &mut self.state {
+                    if let ChippyAppState::LoadedIn { players, .. } = &mut self.state {
                         players.insert(uuid, player);
                     }
                 }
@@ -126,11 +138,14 @@ impl App for ChippyApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         ctx.request_repaint();
         self.game_update();
-        
+
         let mut needs_to_reset = false;
         let mut error = None;
         match &mut self.state {
-            ChippyAppState::WaitingMenu {write_name_buffer, server_buffer} => {
+            ChippyAppState::WaitingMenu {
+                write_name_buffer,
+                server_buffer,
+            } => {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     if self.io.is_disconnected() {
                         ui.vertical(|ui| {
@@ -143,7 +158,10 @@ impl App for ChippyApp {
                                 ui.text_edit_singleline(write_name_buffer);
                             });
                             if ui.button("Connect").clicked() {
-                                if let Err(e) = self.io.connect(server_buffer.take(), write_name_buffer.take()) {
+                                if let Err(e) = self
+                                    .io
+                                    .connect(server_buffer.take(), write_name_buffer.take())
+                                {
                                     error!("Error connecting to server: {e:?}");
                                     error = Some(e.to_string());
                                 }
@@ -157,7 +175,7 @@ impl App for ChippyApp {
                     }
                 });
             }
-            ChippyAppState::ErrorHappened {error} => {
+            ChippyAppState::ErrorHappened { error } => {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.label("Error connecting to server: ");
                     ui.code(error);
@@ -166,12 +184,20 @@ impl App for ChippyApp {
                     }
                 });
             }
-            ChippyAppState::LoadedIn { send_msg_buffer, msgs_so_far, our_uuid, players, pot } => {
+            ChippyAppState::LoadedIn {
+                send_msg_buffer,
+                msgs_so_far,
+                our_uuid,
+                players,
+                pot,
+            } => {
                 egui::TopBottomPanel::bottom("send msg").show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.text_edit_singleline(send_msg_buffer);
                         if ui.button("Send Msg").clicked() {
-                            self.io.send_req(EventToServer::SendMessage { content: std::mem::take(send_msg_buffer)});
+                            self.io.send_req(EventToServer::SendMessage {
+                                content: std::mem::take(send_msg_buffer),
+                            });
                         }
                         if ui.button("Quit").clicked() {
                             needs_to_reset = true;
@@ -181,11 +207,13 @@ impl App for ChippyApp {
                 egui::SidePanel::right("view msg").show(ctx, |ui| {
                     for (sender, content) in msgs_so_far {
                         match sender {
-                            MessageSender::Player(uuid) => if let Some(player) = players.get(uuid) {
-                                if *our_uuid == *uuid {
-                                    ui.label(format!("{player} (you): {content}"));
-                                } else {
-                                    ui.label(format!("{player}: {content}"));
+                            MessageSender::Player(uuid) => {
+                                if let Some(player) = players.get(uuid) {
+                                    if *our_uuid == *uuid {
+                                        ui.label(format!("{player} (you): {content}"));
+                                    } else {
+                                        ui.label(format!("{player}: {content}"));
+                                    }
                                 }
                             } //should always be OK but whatever
                             MessageSender::Admin => {
@@ -219,13 +247,13 @@ impl App for ChippyApp {
                 });
             }
         }
-        
+
         if needs_to_reset {
             self.io.quit();
             self.state = ChippyAppState::default();
         } else if let Some(error) = error {
             self.io.quit();
-            self.state = ChippyAppState::ErrorHappened {error};
+            self.state = ChippyAppState::ErrorHappened { error };
         }
     }
 

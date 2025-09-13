@@ -1,9 +1,9 @@
 #![warn(clippy::all, clippy::nursery, clippy::pedantic)]
 
 pub mod events;
+pub mod game_types;
 pub mod integer;
 pub mod ser_glue;
-pub mod game_types;
 
 #[must_use]
 pub fn display_bytes_as_hex_array(b: &[u8]) -> String {

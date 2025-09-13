@@ -1,28 +1,36 @@
-use std::collections::VecDeque;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use futures::{SinkExt, StreamExt};
-use tokio::net::TcpStream;
-use tokio::sync::broadcast::{Sender, Receiver};
-use tokio::sync::RwLock;
-use tokio_tungstenite::accept_async;
-use tokio_tungstenite::tungstenite::{Message, Bytes};
+use crate::Table;
+use crate::client::Client;
 use fishandchippy::events::client::EventToClient;
 use fishandchippy::events::server::{EventToServer, ServerEventDeserer};
 use fishandchippy::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
-use crate::client::Client;
-use crate::Table;
+use futures::{SinkExt, StreamExt};
+use std::collections::VecDeque;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::net::TcpStream;
+use tokio::sync::RwLock;
+use tokio::sync::broadcast::{Receiver, Sender};
+use tokio_tungstenite::accept_async;
+use tokio_tungstenite::tungstenite::{Bytes, Message};
 
-pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, global_send_event: Sender<EventToClient>, mut global_recv_event: Receiver<EventToClient>, table: Arc<RwLock<Table>>) -> color_eyre::Result<()> {
+pub async fn handle_connection(
+    peer: SocketAddr,
+    stream: TcpStream,
+    global_send_event: Sender<EventToClient>,
+    mut global_recv_event: Receiver<EventToClient>,
+    table: Arc<RwLock<Table>>,
+) -> color_eyre::Result<()> {
     let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
     println!("New WebSocket connection: {peer}");
-    
+
     let mut msgs_to_process: VecDeque<Message> = VecDeque::new();
     let mut client = Client::new(peer);
 
     loop {
         for msg in client.local_msgs_to_send() {
-            ws_stream.send(Message::Binary(Bytes::from_owner(msg.ser().1))).await?;
+            ws_stream
+                .send(Message::Binary(Bytes::from_owner(msg.ser().1)))
+                .await?;
         }
         for msg in client.global_msgs_to_send() {
             if global_send_event.send(msg).is_err() {
@@ -62,7 +70,9 @@ pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, global_send_
                     let mut deserer = EventToServer::deser();
                     loop {
                         //TODO: no bytes left but not done?
-                        if matches!(deserer, ServerEventDeserer::Start(_)) && binary.peek().is_none() {
+                        if matches!(deserer, ServerEventDeserer::Start(_))
+                            && binary.peek().is_none()
+                        {
                             break;
                         }
 
@@ -95,10 +105,9 @@ pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, global_send_
                                     }
                                 }
                             }
-                            DesiredInput::Extra => unreachable!()
+                            DesiredInput::Extra => unreachable!(),
                         }
                     }
-
                 }
                 Message::Close(close) => {
                     client.close(close.as_ref(), &table).await;
@@ -109,6 +118,6 @@ pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, global_send_
             }
         }
     }
-    
+
     Ok(())
 }

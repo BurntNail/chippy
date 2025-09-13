@@ -1,23 +1,22 @@
 #![warn(clippy::all, clippy::nursery, clippy::pedantic)]
 
-mod conn;
 mod client;
+mod conn;
 
+use crate::conn::handle_connection;
+use fishandchippy::game_types::player::Player;
+use fishandchippy::game_types::pot::Pot;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
-use fishandchippy::game_types::player::Player;
-use fishandchippy::game_types::pot::Pot;
-use crate::conn::handle_connection;
 
 #[derive(Debug, Default, Clone)]
 pub struct Table {
     pub pot: Pot,
-    pub players: HashMap<Uuid, Player>
+    pub players: HashMap<Uuid, Player>,
 }
-
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -31,7 +30,7 @@ async fn main() -> color_eyre::Result<()> {
         let send_event = send_event.clone();
         let recv_event = send_event.subscribe();
         let table = table.clone();
-        
+
         tokio::task::spawn(async move {
             if let Err(e) = handle_connection(addr, stream, send_event, recv_event, table).await {
                 eprintln!("Error serving conn: {e}");

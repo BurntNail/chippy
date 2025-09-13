@@ -1,2 +1,2 @@
-pub mod pot;
 pub mod player;
+pub mod pot;

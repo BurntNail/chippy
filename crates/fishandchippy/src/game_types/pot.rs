@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use uuid::Uuid;
 use crate::integer::{Integer, IntegerDeserialiser, IntegerReadError, SignedState};
-use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 use crate::ser_glue::list::{ListDeserialiser, ListSer};
 use crate::ser_glue::tuple::{TupleDeserialiser, TupleReadError};
 use crate::ser_glue::uuid::UuidDeserialiser;
+use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use uuid::Uuid;
 
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Pot {
@@ -13,19 +13,18 @@ pub struct Pot {
     pub ready_to_put_in: HashMap<Uuid, u32>,
 }
 
-
 impl Serable for Pot {
     type ExtraOutput = ();
 
     fn ser_into(&self, into: &mut Vec<u8>) -> Self::ExtraOutput {
         Integer::from(self.current_value).ser_into(into);
-        
-        let to_put_in = 
-            self.ready_to_put_in
-                .iter()
-                .map(|(uuid, value)| (*uuid, Integer::from(*value)))
-                .collect::<Vec<_>>();
-        
+
+        let to_put_in = self
+            .ready_to_put_in
+            .iter()
+            .map(|(uuid, value)| (*uuid, Integer::from(*value)))
+            .collect::<Vec<_>>();
+
         Integer::from(to_put_in.len()).ser_into(into);
         ListSer(&to_put_in).ser_into(into); //can discard extras as we know they're constant
     }
@@ -35,7 +34,10 @@ impl Serable for Pot {
 pub enum PotDeserialiser {
     ReadingPotSize(IntegerDeserialiser),
     ReadingNumberOfPlayers(u32, IntegerDeserialiser),
-    ReadingSoFars(u32, ListDeserialiser<TupleDeserialiser<UuidDeserialiser, IntegerDeserialiser>>),
+    ReadingSoFars(
+        u32,
+        ListDeserialiser<TupleDeserialiser<UuidDeserialiser, IntegerDeserialiser>>,
+    ),
 }
 
 impl Deserable for Pot {
@@ -86,7 +88,9 @@ impl DeserMachine for PotDeserialiser {
 
     fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
-            Self::ReadingPotSize(deser) | Self::ReadingNumberOfPlayers(_, deser) => deser.wants_read(),
+            Self::ReadingPotSize(deser) | Self::ReadingNumberOfPlayers(_, deser) => {
+                deser.wants_read()
+            }
             Self::ReadingSoFars(_, deser) => deser.wants_read(),
         }
     }
@@ -95,7 +99,9 @@ impl DeserMachine for PotDeserialiser {
 
     fn finish_bytes_for_writing(&mut self, n: usize) {
         match self {
-            Self::ReadingPotSize(deser) | Self::ReadingNumberOfPlayers(_, deser) => deser.finish_bytes_for_writing(n),
+            Self::ReadingPotSize(deser) | Self::ReadingNumberOfPlayers(_, deser) => {
+                deser.finish_bytes_for_writing(n)
+            }
             Self::ReadingSoFars(_, deser) => deser.finish_bytes_for_writing(n),
         }
     }
@@ -106,27 +112,37 @@ impl DeserMachine for PotDeserialiser {
                 FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::ReadingPotSize(deser))),
                 FsmResult::Done(pot) => {
                     let pot = pot.try_into()?;
-                    Ok(FsmResult::Continue(Self::ReadingNumberOfPlayers(pot, Integer::deser_with_input(SignedState::Unsigned))))
+                    Ok(FsmResult::Continue(Self::ReadingNumberOfPlayers(
+                        pot,
+                        Integer::deser_with_input(SignedState::Unsigned),
+                    )))
                 }
-            }
+            },
             Self::ReadingNumberOfPlayers(pot, deser) => match deser.process()? {
-                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::ReadingNumberOfPlayers(pot, deser))),
-                FsmResult::Done(number_in_pot) => {
-                    Ok(FsmResult::Continue(Self::ReadingSoFars(pot, ListDeserialiser::new_with_starting_input(vec![((), SignedState::Unsigned); number_in_pot.try_into()?]))))
-                }
-            }
+                FsmResult::Continue(deser) => Ok(FsmResult::Continue(
+                    Self::ReadingNumberOfPlayers(pot, deser),
+                )),
+                FsmResult::Done(number_in_pot) => Ok(FsmResult::Continue(Self::ReadingSoFars(
+                    pot,
+                    ListDeserialiser::new_with_starting_input(vec![
+                        ((), SignedState::Unsigned);
+                        number_in_pot.try_into()?
+                    ]),
+                ))),
+            },
             Self::ReadingSoFars(current_value, deser) => match deser.process()? {
-                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::ReadingSoFars(current_value, deser))),
-                FsmResult::Done(list) => {
-                    Ok(FsmResult::Done(Pot {
-                        current_value,
-                        ready_to_put_in: list
-                            .into_iter()
-                            .map(|(player, amt)| amt.try_into().map(|amt| (player, amt)))
-                            .collect::<Result<HashMap<_, _>, _>>()?
-                    }))
-                }
-            }
+                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::ReadingSoFars(
+                    current_value,
+                    deser,
+                ))),
+                FsmResult::Done(list) => Ok(FsmResult::Done(Pot {
+                    current_value,
+                    ready_to_put_in: list
+                        .into_iter()
+                        .map(|(player, amt)| amt.try_into().map(|amt| (player, amt)))
+                        .collect::<Result<HashMap<_, _>, _>>()?,
+                })),
+            },
         }
     }
 }

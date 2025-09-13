@@ -1,8 +1,8 @@
-use std::fmt::{Display, Formatter};
-use std::hash::{Hash};
 use crate::integer::{Integer, IntegerDeserialiser, IntegerReadError, SignedState};
-use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 use crate::ser_glue::string::{StringDeserialiser, StringReadError};
+use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
+use std::fmt::{Display, Formatter};
+use std::hash::Hash;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Player {
@@ -30,8 +30,8 @@ pub enum PlayerDeserialiser {
     GettingName(StringDeserialiser),
     GettingBalance {
         name: String,
-        deser: IntegerDeserialiser
-    }
+        deser: IntegerDeserialiser,
+    },
 }
 
 impl Deserable for Player {
@@ -81,11 +81,11 @@ impl DeserMachine for PlayerDeserialiser {
     fn new() -> Self {
         Self::GettingName(StringDeserialiser::new())
     }
-    
+
     fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
             Self::GettingName(deser) => deser.wants_read(),
-            Self::GettingBalance {deser, ..} => deser.wants_read(),
+            Self::GettingBalance { deser, .. } => deser.wants_read(),
         }
     }
 
@@ -94,7 +94,7 @@ impl DeserMachine for PlayerDeserialiser {
     fn finish_bytes_for_writing(&mut self, n: usize) {
         match self {
             Self::GettingName(deser) => deser.finish_bytes_for_writing(n),
-            Self::GettingBalance {deser, ..} => deser.finish_bytes_for_writing(n),
+            Self::GettingBalance { deser, .. } => deser.finish_bytes_for_writing(n),
         }
     }
 
@@ -102,18 +102,21 @@ impl DeserMachine for PlayerDeserialiser {
         match self {
             Self::GettingName(deser) => match deser.process()? {
                 FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::GettingName(deser))),
-                FsmResult::Done(name) => Ok(FsmResult::Continue(Self::GettingBalance {name, deser: Integer::deser_with_input(SignedState::Unsigned)}))
-            }
+                FsmResult::Done(name) => Ok(FsmResult::Continue(Self::GettingBalance {
+                    name,
+                    deser: Integer::deser_with_input(SignedState::Unsigned),
+                })),
+            },
             //allowed to unwrap because infallible
-            Self::GettingBalance {name, deser} => match deser.process()? {
-                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::GettingBalance {name, deser})),
-                FsmResult::Done(balance) => {
-                    Ok(FsmResult::Done(Player {
-                        name,
-                        balance: balance.try_into()?,
-                    }))
+            Self::GettingBalance { name, deser } => match deser.process()? {
+                FsmResult::Continue(deser) => {
+                    Ok(FsmResult::Continue(Self::GettingBalance { name, deser }))
                 }
-            }
+                FsmResult::Done(balance) => Ok(FsmResult::Done(Player {
+                    name,
+                    balance: balance.try_into()?,
+                })),
+            },
         }
     }
 }

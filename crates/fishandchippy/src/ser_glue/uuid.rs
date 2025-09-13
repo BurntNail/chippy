@@ -1,6 +1,6 @@
+use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 use std::convert::Infallible;
 use uuid::Uuid;
-use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 
 impl Serable for Uuid {
     type ExtraOutput = ();
@@ -13,7 +13,7 @@ impl Serable for Uuid {
 #[derive(Debug)]
 pub struct UuidDeserialiser {
     content: [u8; 16],
-    bytes_left: usize
+    bytes_left: usize,
 }
 
 impl Deserable for Uuid {
@@ -28,7 +28,7 @@ impl DeserMachine for UuidDeserialiser {
     fn new() -> Self {
         Self {
             content: [0; 16],
-            bytes_left: 16
+            bytes_left: 16,
         }
     }
 

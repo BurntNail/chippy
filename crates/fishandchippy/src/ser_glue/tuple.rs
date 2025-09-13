@@ -1,8 +1,7 @@
-use std::fmt::{Display, Formatter};
 use crate::ser_glue::{DeserMachine, DesiredInput, FsmResult, Serable};
+use std::fmt::{Display, Formatter};
 
-impl<A: Serable, B: Serable> Serable for (A, B)
-{
+impl<A: Serable, B: Serable> Serable for (A, B) {
     type ExtraOutput = (A::ExtraOutput, B::ExtraOutput);
 
     fn ser_into(&self, into: &mut Vec<u8>) -> Self::ExtraOutput {
@@ -17,7 +16,7 @@ impl<A: Serable, B: Serable> Serable for (A, B)
 #[derive(Debug)]
 pub enum TupleReadError<AError, BError> {
     AError(AError),
-    BError(BError)
+    BError(BError),
 }
 
 impl<A: Display, B: Display> Display for TupleReadError<A, B> {
@@ -29,7 +28,9 @@ impl<A: Display, B: Display> Display for TupleReadError<A, B> {
     }
 }
 
-impl<A: std::error::Error + 'static, B: std::error::Error + 'static> std::error::Error for TupleReadError<A, B> {
+impl<A: std::error::Error + 'static, B: std::error::Error + 'static> std::error::Error
+    for TupleReadError<A, B>
+{
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::AError(e) => Some(e),
@@ -44,20 +45,20 @@ impl<A: std::error::Error + 'static, B: std::error::Error + 'static> std::error:
 pub enum TupleDeserialiser<ADeser, BDeser>
 where
     ADeser: DeserMachine,
-    BDeser: DeserMachine
+    BDeser: DeserMachine,
 {
     Empty,
     ReadingA {
         reading_a: ADeser,
-        b_extra: BDeser::ExtraInput
+        b_extra: BDeser::ExtraInput,
     },
     ReadingB {
         a: ADeser::Output,
-        reading_b: BDeser
-    }
+        reading_b: BDeser,
+    },
 }
 
-impl <ADeser, BDeser> DeserMachine for TupleDeserialiser<ADeser, BDeser>
+impl<ADeser, BDeser> DeserMachine for TupleDeserialiser<ADeser, BDeser>
 where
     ADeser: DeserMachine,
     BDeser: DeserMachine,
@@ -66,7 +67,7 @@ where
 {
     type ExtraInput = (ADeser::ExtraInput, BDeser::ExtraInput);
     type Output = (ADeser::Output, BDeser::Output);
-    type Error = TupleReadError<ADeser::Error, BDeser::Error>; 
+    type Error = TupleReadError<ADeser::Error, BDeser::Error>;
 
     fn new() -> Self {
         Self::Empty
@@ -76,7 +77,7 @@ where
         match self {
             Self::Empty => DesiredInput::Extra,
             Self::ReadingA { reading_a, .. } => reading_a.wants_read(),
-            Self::ReadingB { reading_b, .. } => reading_b.wants_read()
+            Self::ReadingB { reading_b, .. } => reading_b.wants_read(),
         }
     }
 
@@ -91,15 +92,11 @@ where
 
     fn finish_bytes_for_writing(&mut self, n: usize) {
         match self {
-            Self::Empty => {},
-            Self::ReadingA {
-                reading_a, ..
-            } => {
+            Self::Empty => {}
+            Self::ReadingA { reading_a, .. } => {
                 reading_a.finish_bytes_for_writing(n);
             }
-            Self::ReadingB {
-                reading_b, ..
-            } => {
+            Self::ReadingB { reading_b, .. } => {
                 reading_b.finish_bytes_for_writing(n);
             }
         }
@@ -111,24 +108,26 @@ where
                 //can't use ?s because of conflicting impls
                 match reading_a.process() {
                     Ok(reading_a) => match reading_a {
-                        FsmResult::Continue(reading_a) => Ok(FsmResult::Continue(Self::ReadingA {reading_a, b_extra})),
+                        FsmResult::Continue(reading_a) => {
+                            Ok(FsmResult::Continue(Self::ReadingA { reading_a, b_extra }))
+                        }
                         FsmResult::Done(a) => Ok(FsmResult::Continue(Self::ReadingB {
                             a,
                             reading_b: BDeser::new_with_starting_input(b_extra),
-                        }))
-                    }
+                        })),
+                    },
                     Err(e) => Err(TupleReadError::AError(e)),
                 }
             }
-            Self::ReadingB { a, reading_b } => {
-                match reading_b.process() {
-                    Ok(reading_b) => match reading_b {
-                        FsmResult::Continue(reading_b) => Ok(FsmResult::Continue(Self::ReadingB {a, reading_b})),
-                        FsmResult::Done(b) => Ok(FsmResult::Done((a, b)))
+            Self::ReadingB { a, reading_b } => match reading_b.process() {
+                Ok(reading_b) => match reading_b {
+                    FsmResult::Continue(reading_b) => {
+                        Ok(FsmResult::Continue(Self::ReadingB { a, reading_b }))
                     }
-                    Err(e) => Err(TupleReadError::BError(e))
-                }
-            }
+                    FsmResult::Done(b) => Ok(FsmResult::Done((a, b))),
+                },
+                Err(e) => Err(TupleReadError::BError(e)),
+            },
             s @ Self::Empty => Ok(FsmResult::Continue(s)),
         }
     }

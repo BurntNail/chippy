@@ -1,12 +1,15 @@
-use std::collections::HashMap;
-use uuid::Uuid;
-use crate::events::{EventReadError, ADMIN_MSG, GET_ALL_PLAYERS, GET_POT, INTRODUCTION, GET_SPECIFIC_PLAYER, TEXT_MESSAGE};
+use crate::events::{
+    ADMIN_MSG, EventReadError, GET_ALL_PLAYERS, GET_POT, GET_SPECIFIC_PLAYER, INTRODUCTION,
+    TEXT_MESSAGE,
+};
 use crate::game_types::player::{Player, PlayerDeserialiser};
 use crate::game_types::pot::{Pot, PotDeserialiser};
-use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 use crate::ser_glue::map::{BasicMapDeserialiser, BasicMapSer};
 use crate::ser_glue::string::StringDeserialiser;
 use crate::ser_glue::uuid::UuidDeserialiser;
+use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
+use std::collections::HashMap;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EventToClient {
@@ -67,7 +70,7 @@ pub enum ClientEventDeserer {
     DeseringPot(PotDeserialiser),
     DeseringAllPlayers(BasicMapDeserialiser<UuidDeserialiser, PlayerDeserialiser>),
     DeseringPlayerUuid(UuidDeserialiser),
-    DeseringPlayerAfterUuid(Uuid, PlayerDeserialiser)
+    DeseringPlayerAfterUuid(Uuid, PlayerDeserialiser),
 }
 
 impl DeserMachine for ClientEventDeserer {
@@ -78,13 +81,17 @@ impl DeserMachine for ClientEventDeserer {
     fn new() -> Self {
         Self::Start(0)
     }
-    
+
     fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
             Self::Start(space) => DesiredInput::Byte(space),
             Self::GotStart(_start) => DesiredInput::ProcessMe,
-            Self::DeseringIntro(deser) | Self::DeseringTextUuid(deser) | Self::DeseringPlayerUuid(deser) => deser.wants_read(),
-            Self::DeseringTextAfterUuid(_, deser) | Self::DeseringAdminMsg(deser) => deser.wants_read(),
+            Self::DeseringIntro(deser)
+            | Self::DeseringTextUuid(deser)
+            | Self::DeseringPlayerUuid(deser) => deser.wants_read(),
+            Self::DeseringTextAfterUuid(_, deser) | Self::DeseringAdminMsg(deser) => {
+                deser.wants_read()
+            }
             Self::DeseringPlayerAfterUuid(_, deser) => deser.wants_read(),
             Self::DeseringPot(deser) => deser.wants_read(),
             Self::DeseringAllPlayers(deser) => deser.wants_read(),
@@ -101,8 +108,12 @@ impl DeserMachine for ClientEventDeserer {
                 }
             }
             Self::GotStart(_) => {}
-            Self::DeseringIntro(deser) | Self::DeseringTextUuid(deser) | Self::DeseringPlayerUuid(deser) => deser.finish_bytes_for_writing(n),
-            Self::DeseringTextAfterUuid(_, deser) | Self::DeseringAdminMsg(deser) => deser.finish_bytes_for_writing(n),
+            Self::DeseringIntro(deser)
+            | Self::DeseringTextUuid(deser)
+            | Self::DeseringPlayerUuid(deser) => deser.finish_bytes_for_writing(n),
+            Self::DeseringTextAfterUuid(_, deser) | Self::DeseringAdminMsg(deser) => {
+                deser.finish_bytes_for_writing(n)
+            }
             Self::DeseringPlayerAfterUuid(_, deser) => deser.finish_bytes_for_writing(n),
             Self::DeseringPot(deser) => deser.finish_bytes_for_writing(n),
             Self::DeseringAllPlayers(deser) => deser.finish_bytes_for_writing(n),
@@ -117,55 +128,68 @@ impl DeserMachine for ClientEventDeserer {
                 INTRODUCTION => Ok(FsmResult::Continue(Self::DeseringIntro(Uuid::deser()))),
                 ADMIN_MSG => Ok(FsmResult::Continue(Self::DeseringAdminMsg(String::deser()))),
                 GET_POT => Ok(FsmResult::Continue(Self::DeseringPot(Pot::deser()))),
-                GET_ALL_PLAYERS => Ok(FsmResult::Continue(Self::DeseringAllPlayers(BasicMapDeserialiser::new()))),
-                GET_SPECIFIC_PLAYER => Ok(FsmResult::Continue(Self::DeseringPlayerUuid(Uuid::deser()))),
+                GET_ALL_PLAYERS => Ok(FsmResult::Continue(Self::DeseringAllPlayers(
+                    BasicMapDeserialiser::new(),
+                ))),
+                GET_SPECIFIC_PLAYER => {
+                    Ok(FsmResult::Continue(Self::DeseringPlayerUuid(Uuid::deser())))
+                }
                 n => Err(EventReadError::InvalidKind(n)),
             },
-            Self::DeseringIntro(deser) => {
-                Ok(deser.mapped_process::<_, _, std::convert::Infallible>(Self::DeseringIntro, EventToClient::Introduced).unwrap())
-            }
-            Self::DeseringTextUuid(deser) => match deser.process().unwrap() {
-                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringTextUuid(deser))),
-                FsmResult::Done(uuid) => Ok(FsmResult::Continue(Self::DeseringTextAfterUuid(uuid, String::deser()))),
-            }
-            Self::DeseringTextAfterUuid(uuid, deser) => {
-                deser.mapped_process(
-                    |deser| Self::DeseringTextAfterUuid(uuid, deser),
-                    |msg| EventToClient::TxtSent(uuid, msg),
+            Self::DeseringIntro(deser) => Ok(deser
+                .mapped_process::<_, _, std::convert::Infallible>(
+                    Self::DeseringIntro,
+                    EventToClient::Introduced,
                 )
-            }
+                .unwrap()),
+            Self::DeseringTextUuid(deser) => match deser.process().unwrap() {
+                FsmResult::Continue(deser) => {
+                    Ok(FsmResult::Continue(Self::DeseringTextUuid(deser)))
+                }
+                FsmResult::Done(uuid) => Ok(FsmResult::Continue(Self::DeseringTextAfterUuid(
+                    uuid,
+                    String::deser(),
+                ))),
+            },
+            Self::DeseringTextAfterUuid(uuid, deser) => deser.mapped_process(
+                |deser| Self::DeseringTextAfterUuid(uuid, deser),
+                |msg| EventToClient::TxtSent(uuid, msg),
+            ),
             Self::DeseringAdminMsg(deser) => {
                 deser.mapped_process(Self::DeseringAdminMsg, EventToClient::AdminMsg)
             }
-            Self::DeseringPot(deser) => {
-                deser.mapped_process(Self::DeseringPot, EventToClient::Pot)
-            }
+            Self::DeseringPot(deser) => deser.mapped_process(Self::DeseringPot, EventToClient::Pot),
             Self::DeseringAllPlayers(deser) => match deser.process()? {
-                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringAllPlayers(deser))),
+                FsmResult::Continue(deser) => {
+                    Ok(FsmResult::Continue(Self::DeseringAllPlayers(deser)))
+                }
                 FsmResult::Done(players) => Ok(FsmResult::Done(EventToClient::AllPlayers(players))),
             },
             Self::DeseringPlayerUuid(deser) => match deser.process().unwrap() {
-                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringPlayerUuid(deser))),
-                FsmResult::Done(uuid) => Ok(FsmResult::Continue(Self::DeseringPlayerAfterUuid(uuid, Player::deser()))),
-            }
-            Self::DeseringPlayerAfterUuid(uuid, deser) => {
-                deser.mapped_process(
-                    |deser| Self::DeseringPlayerAfterUuid(uuid, deser),
-                    |player| EventToClient::SpecificPlayer(uuid, player),
-                )
-            }
+                FsmResult::Continue(deser) => {
+                    Ok(FsmResult::Continue(Self::DeseringPlayerUuid(deser)))
+                }
+                FsmResult::Done(uuid) => Ok(FsmResult::Continue(Self::DeseringPlayerAfterUuid(
+                    uuid,
+                    Player::deser(),
+                ))),
+            },
+            Self::DeseringPlayerAfterUuid(uuid, deser) => deser.mapped_process(
+                |deser| Self::DeseringPlayerAfterUuid(uuid, deser),
+                |player| EventToClient::SpecificPlayer(uuid, player),
+            ),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use uuid::Uuid;
     use crate::events::client::{ClientEventDeserer, EventToClient};
     use crate::game_types::player::Player;
     use crate::game_types::pot::Pot;
     use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
+    use std::collections::HashMap;
+    use uuid::Uuid;
 
     #[test]
     fn ser_events_individually() {
@@ -176,9 +200,9 @@ mod tests {
             assert_eq!(example, deserialised[0]);
         }
     }
-    
+
     #[test]
-    fn ser_events_mass () {
+    fn ser_events_mass() {
         let example_data = example_data().to_vec();
         let mut output = vec![];
         example_data.iter().for_each(|e| e.ser_into(&mut output));
@@ -186,29 +210,57 @@ mod tests {
         assert_eq!(example_data, deserialised);
     }
 
-    fn example_data () -> [EventToClient; 6] {
+    fn example_data() -> [EventToClient; 6] {
         [
             EventToClient::TxtSent(Uuid::new_v4(), "argghhhhhhhhh éà🤧🤧🤧".to_string()),
             EventToClient::AdminMsg("get den'd ;)".to_string()),
             EventToClient::Introduced(Uuid::new_v4()),
             EventToClient::Pot(Pot {
                 current_value: 123_456_789,
-                ready_to_put_in: HashMap::from([(Uuid::new_v4(), 123), (Uuid::new_v4(), 456), (Uuid::new_v4(), 789)]),
+                ready_to_put_in: HashMap::from([
+                    (Uuid::new_v4(), 123),
+                    (Uuid::new_v4(), 456),
+                    (Uuid::new_v4(), 789),
+                ]),
             }),
             EventToClient::AllPlayers(HashMap::from([
-                (Uuid::new_v4(), Player { name: "Alice".to_string(), balance: 1 }),
-                (Uuid::new_v4(), Player { name: "François".to_string(), balance: u32::MAX }),
-                (Uuid::new_v4(), Player { name: "範例名稱".to_string(), balance: u32::MAX - 1 })
+                (
+                    Uuid::new_v4(),
+                    Player {
+                        name: "Alice".to_string(),
+                        balance: 1,
+                    },
+                ),
+                (
+                    Uuid::new_v4(),
+                    Player {
+                        name: "François".to_string(),
+                        balance: u32::MAX,
+                    },
+                ),
+                (
+                    Uuid::new_v4(),
+                    Player {
+                        name: "範例名稱".to_string(),
+                        balance: u32::MAX - 1,
+                    },
+                ),
             ])),
-            EventToClient::SpecificPlayer(Uuid::new_v4(), Player {name: "".to_string(), balance: 0}),
+            EventToClient::SpecificPlayer(
+                Uuid::new_v4(),
+                Player {
+                    name: "".to_string(),
+                    balance: 0,
+                },
+            ),
         ]
     }
-    
-    fn deser_from_vec (v: Vec<u8>) -> Result<Vec<EventToClient>, Box<dyn std::error::Error>> {
+
+    fn deser_from_vec(v: Vec<u8>) -> Result<Vec<EventToClient>, Box<dyn std::error::Error>> {
         let mut binary = v.into_iter().peekable();
         let mut deserer = EventToClient::deser();
         let mut found = vec![];
-        
+
         loop {
             if binary.peek().is_none() && matches!(deserer, ClientEventDeserer::Start(_)) {
                 break;
@@ -242,10 +294,10 @@ mod tests {
                         }
                     }
                 }
-                DesiredInput::Extra => unreachable!()
+                DesiredInput::Extra => unreachable!(),
             }
         }
-        
+
         Ok(found)
     }
 }

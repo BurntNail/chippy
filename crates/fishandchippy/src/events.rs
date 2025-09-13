@@ -1,12 +1,12 @@
-use std::convert::Infallible;
-use crate::integer::IntegerReadError;
-use crate::ser_glue::string::StringReadError;
-use std::fmt::{Display, Formatter};
-use std::string::FromUtf8Error;
 use crate::game_types::player::PlayerReadError;
 use crate::game_types::pot::PotReadError;
+use crate::integer::IntegerReadError;
 use crate::ser_glue::list::BasicListReadError;
+use crate::ser_glue::string::StringReadError;
 use crate::ser_glue::tuple::TupleReadError;
+use std::convert::Infallible;
+use std::fmt::{Display, Formatter};
+use std::string::FromUtf8Error;
 
 pub mod client;
 pub mod server;
@@ -27,7 +27,7 @@ pub enum EventReadError {
     StringRead(StringReadError),
     Pot(PotReadError),
     ListOfPlayers(BasicListReadError<TupleReadError<Infallible, PlayerReadError>>),
-    Player(PlayerReadError)
+    Player(PlayerReadError),
 }
 
 impl From<FromUtf8Error> for EventReadError {

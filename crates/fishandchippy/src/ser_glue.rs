@@ -1,10 +1,10 @@
 use std::fmt::Debug;
 
+pub mod list;
+pub mod map;
 pub mod string;
 pub mod tuple;
-pub mod list;
 pub mod uuid;
-pub mod map;
 
 pub trait Serable {
     type ExtraOutput;
@@ -65,9 +65,13 @@ pub trait DeserMachine: Sized {
     fn finish_bytes_for_writing(&mut self, n: usize);
     #[allow(clippy::missing_errors_doc)] //you provide it lol i have no clue what the problem could be
     fn process(self) -> Result<FsmResult<Self, Self::Output>, Self::Error>;
-    
+
     #[allow(clippy::missing_errors_doc)] //samesies
-    fn mapped_process<MappedInput, MappedOutput, MappedError: From<Self::Error>>(self, continue_variant: impl FnOnce(Self) -> MappedInput, done_variant: impl FnOnce(Self::Output) -> MappedOutput) -> Result<FsmResult<MappedInput, MappedOutput>, MappedError> {
+    fn mapped_process<MappedInput, MappedOutput, MappedError: From<Self::Error>>(
+        self,
+        continue_variant: impl FnOnce(Self) -> MappedInput,
+        done_variant: impl FnOnce(Self::Output) -> MappedOutput,
+    ) -> Result<FsmResult<MappedInput, MappedOutput>, MappedError> {
         match self.process()? {
             FsmResult::Continue(deser) => Ok(FsmResult::Continue(continue_variant(deser))),
             FsmResult::Done(done) => Ok(FsmResult::Done(done_variant(done))),

@@ -1,18 +1,16 @@
-use uuid::Uuid;
-use crate::events::{EventReadError, INTRODUCTION, TEXT_MESSAGE, GET_ALL_PLAYERS, GET_SPECIFIC_PLAYER, ADD_TO_POT};
+use crate::events::{
+    ADD_TO_POT, EventReadError, GET_ALL_PLAYERS, GET_SPECIFIC_PLAYER, INTRODUCTION, TEXT_MESSAGE,
+};
 use crate::integer::{Integer, IntegerDeserialiser, SignedState};
-use crate::ser_glue::string::{StringDeserialiser};
-use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
+use crate::ser_glue::string::StringDeserialiser;
 use crate::ser_glue::uuid::UuidDeserialiser;
+use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum EventToServer {
-    SendMessage {
-        content: String
-    },
-    Introduction {
-        name: String,
-    },
+    SendMessage { content: String },
+    Introduction { name: String },
     GetStartInformation,
     GetSpecificPlayer(Uuid),
     AddToPot(u32),
@@ -27,7 +25,7 @@ impl Serable for EventToServer {
                 into.push(TEXT_MESSAGE);
                 content.ser_into(into);
             }
-            Self::Introduction {name} => {
+            Self::Introduction { name } => {
                 into.push(INTRODUCTION);
                 name.ser_into(into);
             }
@@ -88,8 +86,10 @@ impl DeserMachine for ServerEventDeserer {
                     *self = Self::GotStart(*start);
                 }
             }
-            Self::GotStart(_) => {},
-            Self::DeseringTxtMsg(deser) | Self::DeseringIntroduction(deser) => deser.finish_bytes_for_writing(n),
+            Self::GotStart(_) => {}
+            Self::DeseringTxtMsg(deser) | Self::DeseringIntroduction(deser) => {
+                deser.finish_bytes_for_writing(n)
+            }
             Self::DeseringAddToPot(deser) => deser.finish_bytes_for_writing(n),
             Self::DeseringGetSpecificPlayer(deser) => deser.finish_bytes_for_writing(n),
         }
@@ -100,37 +100,49 @@ impl DeserMachine for ServerEventDeserer {
             Self::Start(n) => Ok(FsmResult::Continue(Self::Start(n))),
             Self::GotStart(n) => match n {
                 TEXT_MESSAGE => Ok(FsmResult::Continue(Self::DeseringTxtMsg(String::deser()))),
-                INTRODUCTION => Ok(FsmResult::Continue(Self::DeseringIntroduction(String::deser()))),
+                INTRODUCTION => Ok(FsmResult::Continue(Self::DeseringIntroduction(
+                    String::deser(),
+                ))),
                 GET_ALL_PLAYERS => Ok(FsmResult::Done(EventToServer::GetStartInformation)),
-                GET_SPECIFIC_PLAYER => Ok(FsmResult::Continue(Self::DeseringGetSpecificPlayer(Uuid::deser()))),
-                ADD_TO_POT => Ok(FsmResult::Continue(Self::DeseringAddToPot(Integer::deser_with_input(SignedState::Unsigned)))),
+                GET_SPECIFIC_PLAYER => Ok(FsmResult::Continue(Self::DeseringGetSpecificPlayer(
+                    Uuid::deser(),
+                ))),
+                ADD_TO_POT => Ok(FsmResult::Continue(Self::DeseringAddToPot(
+                    Integer::deser_with_input(SignedState::Unsigned),
+                ))),
                 n => Err(EventReadError::InvalidKind(n)),
             },
-            Self::DeseringTxtMsg(deser) => {
-                deser.mapped_process(Self::DeseringTxtMsg, |content| EventToServer::SendMessage {content})
-            }
-            Self::DeseringIntroduction(deser) => {
-                deser.mapped_process(Self::DeseringIntroduction, |name| EventToServer::Introduction {name})
-            }
+            Self::DeseringTxtMsg(deser) => deser.mapped_process(Self::DeseringTxtMsg, |content| {
+                EventToServer::SendMessage { content }
+            }),
+            Self::DeseringIntroduction(deser) => deser
+                .mapped_process(Self::DeseringIntroduction, |name| {
+                    EventToServer::Introduction { name }
+                }),
             Self::DeseringAddToPot(deser) => match deser.process()? {
-                FsmResult::Continue(deser) => Ok(FsmResult::Continue(Self::DeseringAddToPot(deser))),
+                FsmResult::Continue(deser) => {
+                    Ok(FsmResult::Continue(Self::DeseringAddToPot(deser)))
+                }
                 FsmResult::Done(amt) => {
                     let amt: u32 = amt.try_into()?;
                     Ok(FsmResult::Done(EventToServer::AddToPot(amt)))
                 }
-            }
-            Self::DeseringGetSpecificPlayer(deser) => {
-                Ok(deser.mapped_process::<_, _, std::convert::Infallible>(Self::DeseringGetSpecificPlayer, EventToServer::GetSpecificPlayer).unwrap())
-            }
+            },
+            Self::DeseringGetSpecificPlayer(deser) => Ok(deser
+                .mapped_process::<_, _, std::convert::Infallible>(
+                    Self::DeseringGetSpecificPlayer,
+                    EventToServer::GetSpecificPlayer,
+                )
+                .unwrap()),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use uuid::Uuid;
     use crate::events::server::{EventToServer, ServerEventDeserer};
     use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
+    use uuid::Uuid;
 
     #[test]
     fn ser_events_individually() {
@@ -143,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn ser_events_mass () {
+    fn ser_events_mass() {
         let example_data = example_data().to_vec();
         let mut output = vec![];
         example_data.iter().for_each(|e| e.ser_into(&mut output));
@@ -151,17 +163,21 @@ mod tests {
         assert_eq!(example_data, deserialised);
     }
 
-    fn example_data () -> [EventToServer; 5] {
+    fn example_data() -> [EventToServer; 5] {
         [
-            EventToServer::SendMessage {content: "sup? 🤣🤣🤣".to_string()},
-            EventToServer::Introduction {name: "範例名稱".to_string()},
+            EventToServer::SendMessage {
+                content: "sup? 🤣🤣🤣".to_string(),
+            },
+            EventToServer::Introduction {
+                name: "範例名稱".to_string(),
+            },
             EventToServer::GetStartInformation,
             EventToServer::GetSpecificPlayer(Uuid::new_v4()),
             EventToServer::AddToPot(u32::MAX),
         ]
     }
 
-    fn deser_from_vec (v: Vec<u8>) -> Result<Vec<EventToServer>, Box<dyn std::error::Error>> {
+    fn deser_from_vec(v: Vec<u8>) -> Result<Vec<EventToServer>, Box<dyn std::error::Error>> {
         let mut binary = v.into_iter().peekable();
         let mut deserer = EventToServer::deser();
         let mut found = vec![];
@@ -199,7 +215,7 @@ mod tests {
                         }
                     }
                 }
-                DesiredInput::Extra => unreachable!()
+                DesiredInput::Extra => unreachable!(),
             }
         }
 

@@ -1,11 +1,12 @@
-use std::collections::VecDeque;
-use std::fmt::{Debug, Display, Formatter};
 use crate::integer::{Integer, IntegerDeserialiser, IntegerReadError, SignedState};
 use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
+use std::collections::VecDeque;
+use std::fmt::{Debug, Display, Formatter};
 
 pub struct BasicListSer<'a, T>(pub &'a [T]);
 impl<T> Serable for BasicListSer<'_, T>
-where T: Serable<ExtraOutput = ()>,
+where
+    T: Serable<ExtraOutput = ()>,
 {
     type ExtraOutput = ();
 
@@ -18,7 +19,7 @@ where T: Serable<ExtraOutput = ()>,
 #[derive(Debug)]
 pub enum BasicListReadError<E: std::error::Error> {
     Len(IntegerReadError),
-    Element(E)
+    Element(E),
 }
 
 impl<E: std::error::Error> Display for BasicListReadError<E> {
@@ -31,7 +32,7 @@ impl<E: std::error::Error> Display for BasicListReadError<E> {
 }
 
 impl<E: std::error::Error + 'static> std::error::Error for BasicListReadError<E> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)>  {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Len(len) => Some(len),
             Self::Element(el) => Some(el),
@@ -41,12 +42,13 @@ impl<E: std::error::Error + 'static> std::error::Error for BasicListReadError<E>
 
 pub enum BasicListDeserialiser<D: DeserMachine<ExtraInput = ()>> {
     GettingLen(IntegerDeserialiser),
-    GettingElements(ListDeserialiser<D>)
+    GettingElements(ListDeserialiser<D>),
 }
 
-impl<D> DeserMachine for BasicListDeserialiser<D> 
-where D: DeserMachine<ExtraInput = ()>,
-    <D as DeserMachine>::Error: 'static
+impl<D> DeserMachine for BasicListDeserialiser<D>
+where
+    D: DeserMachine<ExtraInput = ()>,
+    <D as DeserMachine>::Error: 'static,
 {
     type ExtraInput = ();
     type Output = Vec<D::Output>;
@@ -59,7 +61,7 @@ where D: DeserMachine<ExtraInput = ()>,
     fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
             Self::GettingLen(deser) => deser.wants_read(),
-            Self::GettingElements(deser) => deser.wants_read()
+            Self::GettingElements(deser) => deser.wants_read(),
         }
     }
 
@@ -80,15 +82,17 @@ where D: DeserMachine<ExtraInput = ()>,
                 Ok(FsmResult::Done(len)) => {
                     let len = match len.try_into() {
                         Ok(len) => len,
-                        Err(e) => return Err(BasicListReadError::Len(e))
+                        Err(e) => return Err(BasicListReadError::Len(e)),
                     };
-                    
-                    Ok(FsmResult::Continue(Self::GettingElements(ListDeserialiser::new_with_starting_input(vec![(); len]))))
+
+                    Ok(FsmResult::Continue(Self::GettingElements(
+                        ListDeserialiser::new_with_starting_input(vec![(); len]),
+                    )))
                 }
-            }
-            Self::GettingElements(deser) => {
-                deser.mapped_process(Self::GettingElements, std::convert::identity).map_err(BasicListReadError::Element)
-            }
+            },
+            Self::GettingElements(deser) => deser
+                .mapped_process(Self::GettingElements, std::convert::identity)
+                .map_err(BasicListReadError::Element),
         }
     }
 }
@@ -99,23 +103,17 @@ impl<T: Serable> Serable for ListSer<'_, T> {
     type ExtraOutput = Vec<T::ExtraOutput>;
 
     fn ser_into(&self, into: &mut Vec<u8>) -> Self::ExtraOutput {
-        self.0
-            .iter()
-            .map(|item| {
-                item.ser_into(into)
-            })
-            .collect()
+        self.0.iter().map(|item| item.ser_into(into)).collect()
     }
 }
 
 #[derive(Debug)]
-pub enum ListDeserialiser<D: DeserMachine>
-{
+pub enum ListDeserialiser<D: DeserMachine> {
     AwaitingExtras,
     GettingElements {
         extras: VecDeque<D::ExtraInput>,
         so_far: Vec<D::Output>,
-        current: D
+        current: D,
     },
     FoundEmptyExtras,
 }
@@ -123,7 +121,7 @@ pub enum ListDeserialiser<D: DeserMachine>
 impl<D> DeserMachine for ListDeserialiser<D>
 where
     D: DeserMachine,
-    <D as DeserMachine>::Error: 'static
+    <D as DeserMachine>::Error: 'static,
 {
     type ExtraInput = Vec<D::ExtraInput>;
     type Output = Vec<D::Output>;
@@ -144,14 +142,14 @@ where
     fn give_starting_input(&mut self, extras: Self::ExtraInput) {
         if matches!(self, Self::AwaitingExtras) {
             let mut extras: VecDeque<D::ExtraInput> = extras.into();
-            
+
             *self = extras.pop_front().map_or_else(
                 || Self::FoundEmptyExtras,
                 |first_extra| Self::GettingElements {
                     extras,
                     so_far: Vec::new(),
                     current: D::new_with_starting_input(first_extra),
-                }
+                },
             );
         }
     }
@@ -159,27 +157,35 @@ where
     fn finish_bytes_for_writing(&mut self, n: usize) {
         match self {
             Self::GettingElements { current, .. } => current.finish_bytes_for_writing(n),
-            Self::AwaitingExtras | Self::FoundEmptyExtras => {},
+            Self::AwaitingExtras | Self::FoundEmptyExtras => {}
         }
     }
 
     fn process(self) -> Result<FsmResult<Self, Self::Output>, Self::Error> {
         match self {
             Self::AwaitingExtras => Ok(FsmResult::Continue(Self::AwaitingExtras)),
-            Self::GettingElements { mut extras, mut so_far, current } => match current.process()? {
-                FsmResult::Continue(current) => Ok(FsmResult::Continue(Self::GettingElements {extras, so_far, current})),
+            Self::GettingElements {
+                mut extras,
+                mut so_far,
+                current,
+            } => match current.process()? {
+                FsmResult::Continue(current) => Ok(FsmResult::Continue(Self::GettingElements {
+                    extras,
+                    so_far,
+                    current,
+                })),
                 FsmResult::Done(next_element) => {
                     so_far.push(next_element);
                     match extras.pop_front() {
                         Some(next_extra) => Ok(FsmResult::Continue(Self::GettingElements {
                             extras,
                             so_far,
-                            current: D::new_with_starting_input(next_extra)
+                            current: D::new_with_starting_input(next_extra),
                         })),
-                        None => Ok(FsmResult::Done(so_far))
+                        None => Ok(FsmResult::Done(so_far)),
                     }
                 }
-            }
+            },
             Self::FoundEmptyExtras => Ok(FsmResult::Done(vec![])),
         }
     }

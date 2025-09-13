@@ -1,7 +1,7 @@
 #![warn(clippy::all, clippy::nursery, clippy::pedantic)]
 
-use eframe::{App, CreationContext};
 use crate::app::ChippyApp;
+use eframe::{App, CreationContext};
 
 mod app;
 mod worker_thread;
@@ -9,7 +9,9 @@ mod worker_thread;
 #[macro_use]
 extern crate log;
 
-fn build_app (_cc: &CreationContext) -> Result<Box<dyn App>, Box<dyn std::error::Error + Send + Sync>> {
+fn build_app(
+    _cc: &CreationContext,
+) -> Result<Box<dyn App>, Box<dyn std::error::Error + Send + Sync>> {
     Ok(Box::new(ChippyApp::new()?))
 }
 
@@ -35,11 +37,7 @@ fn main() {
             .expect("chippy_canvas_id was not a HtmlCanvasElement");
 
         let start_result = eframe::WebRunner::new()
-            .start(
-                canvas,
-                web_options,
-                Box::new(build_app)
-            )
+            .start(canvas, web_options, Box::new(build_app))
             .await;
 
         // Remove the loading text and spinner:

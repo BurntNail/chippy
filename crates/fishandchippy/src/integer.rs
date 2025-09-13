@@ -395,7 +395,7 @@ impl DeserMachine for IntegerDeserialiser {
     fn new() -> Self {
         Self::Start
     }
-    
+
     fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
             Self::Start => DesiredInput::Extra,
