@@ -1,4 +1,10 @@
+use std::fmt::Debug;
+
 pub mod string;
+pub mod tuple;
+pub mod list;
+pub mod uuid;
+pub mod map;
 
 pub trait Serable {
     type ExtraOutput;
@@ -26,7 +32,7 @@ pub enum FsmResult<M, R> {
 pub enum DesiredInput<'a> {
     Byte(&'a mut u8),
     Bytes(&'a mut [u8]),
-    Start,
+    Extra,
     ProcessMe,
 }
 
@@ -38,21 +44,33 @@ pub trait Deserable {
         Self::Deserer::new()
     }
     #[must_use]
-    fn deser_with_input(input: <Self::Deserer as DeserMachine>::StartingInput) -> Self::Deserer {
+    fn deser_with_input(input: <Self::Deserer as DeserMachine>::ExtraInput) -> Self::Deserer {
         Self::Deserer::new_with_starting_input(input)
     }
 }
 
 pub trait DeserMachine: Sized {
-    type StartingInput;
+    type ExtraInput;
     type Output;
-    type Error;
+    type Error: std::error::Error;
 
     fn new() -> Self;
-    fn new_with_starting_input(input: Self::StartingInput) -> Self;
+    fn new_with_starting_input(input: Self::ExtraInput) -> Self {
+        let mut s = Self::new();
+        s.give_starting_input(input);
+        s
+    }
     fn wants_read(&mut self) -> DesiredInput<'_>;
-    fn give_starting_input(&mut self, magic: Self::StartingInput);
+    fn give_starting_input(&mut self, magic: Self::ExtraInput);
     fn finish_bytes_for_writing(&mut self, n: usize);
     #[allow(clippy::missing_errors_doc)] //you provide it lol i have no clue what the problem could be
     fn process(self) -> Result<FsmResult<Self, Self::Output>, Self::Error>;
+    
+    #[allow(clippy::missing_errors_doc)] //samesies
+    fn mapped_process<MappedInput, MappedOutput, MappedError: From<Self::Error>>(self, continue_variant: impl FnOnce(Self) -> MappedInput, done_variant: impl FnOnce(Self::Output) -> MappedOutput) -> Result<FsmResult<MappedInput, MappedOutput>, MappedError> {
+        match self.process()? {
+            FsmResult::Continue(deser) => Ok(FsmResult::Continue(continue_variant(deser))),
+            FsmResult::Done(done) => Ok(FsmResult::Done(done_variant(done))),
+        }
+    }
 }

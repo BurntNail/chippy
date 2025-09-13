@@ -10,3 +10,4 @@ fishandchippy = {path = "../fishandchippy"}
 futures = "0.3.31"
 tokio-tungstenite = "0.27.0"
 web-sys = { version = "0.3.77", features = ["HtmlCanvasElement"] }
+uuid = { version = "1.18.1", features = ["v4"] }

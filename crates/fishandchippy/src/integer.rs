@@ -1,4 +1,5 @@
 //! A module containing a struct [`Integer`] designed to minimise size when serialised.
+//yoinked from souris lol
 
 use crate::display_bytes_as_hex_array;
 use crate::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
@@ -387,24 +388,17 @@ pub enum IntegerDeserialiser {
 }
 
 impl DeserMachine for IntegerDeserialiser {
-    type StartingInput = SignedState;
+    type ExtraInput = SignedState;
     type Output = Integer;
     type Error = IntegerReadError;
 
     fn new() -> Self {
         Self::Start
     }
-
-    fn new_with_starting_input(state: Self::StartingInput) -> Self {
-        Self::GotSignedState {
-            state,
-            to_be_first_byte: 0,
-        }
-    }
-
+    
     fn wants_read(&mut self) -> DesiredInput<'_> {
         match self {
-            Self::Start => DesiredInput::Start,
+            Self::Start => DesiredInput::Extra,
             Self::GotSignedState {
                 state: _,
                 to_be_first_byte,
@@ -420,7 +414,7 @@ impl DeserMachine for IntegerDeserialiser {
         }
     }
 
-    fn give_starting_input(&mut self, state: Self::StartingInput) {
+    fn give_starting_input(&mut self, state: Self::ExtraInput) {
         if matches!(self, Self::Start) {
             *self = Self::GotSignedState {
                 state,

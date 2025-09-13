@@ -3,7 +3,6 @@ set -euxo pipefail
 
 trunk build --release --minify --filehash false
 
-
 rm -v $HOME/Documents/Markdown/katashift/static/wasms/chippy/chippy.js
 rm -v $HOME/Documents/Markdown/katashift/static/wasms/chippy/chippy_bg.wasm
 cp -v dist/chippy.js $HOME/Documents/Markdown/katashift/static/wasms/chippy/

@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::string::FromUtf8Error;
 
 #[derive(Debug)]
-pub enum StringDeserer {
+pub enum StringDeserialiser {
     DeseringLen(IntegerDeserialiser),
     ReadingContent {
         bytes_left: usize,
@@ -13,7 +13,7 @@ pub enum StringDeserer {
 }
 
 impl Deserable for String {
-    type Deserer = StringDeserer;
+    type Deserer = StringDeserialiser;
 }
 
 #[derive(Debug)]
@@ -51,17 +51,13 @@ impl std::error::Error for StringReadError {
     }
 }
 
-impl DeserMachine for StringDeserer {
-    type StartingInput = ();
+impl DeserMachine for StringDeserialiser {
+    type ExtraInput = ();
     type Output = String;
     type Error = StringReadError;
 
     fn new() -> Self {
         Self::DeseringLen(Integer::deser_with_input(SignedState::Unsigned))
-    }
-
-    fn new_with_starting_input((): Self::StartingInput) -> Self {
-        Self::new()
     }
 
     fn wants_read(&mut self) -> DesiredInput<'_> {
@@ -81,7 +77,7 @@ impl DeserMachine for StringDeserer {
         }
     }
 
-    fn give_starting_input(&mut self, (): Self::StartingInput) {}
+    fn give_starting_input(&mut self, (): Self::ExtraInput) {}
 
     fn finish_bytes_for_writing(&mut self, n: usize) {
         match self {
@@ -122,12 +118,18 @@ impl DeserMachine for StringDeserer {
     }
 }
 
-pub struct BasicStringSer<'a>(pub &'a String);
-impl Serable for BasicStringSer<'_> {
+impl Serable for &str {
     type ExtraOutput = ();
 
     fn ser_into(&self, into: &mut Vec<u8>) -> Self::ExtraOutput {
-        Integer::from(self.0.len()).ser_into(into); //can ignore signed state as is always unsigned
-        into.extend_from_slice(self.0.as_bytes());
+        Integer::from(self.len()).ser_into(into); //can ignore signed state as is always unsigned
+        into.extend_from_slice(self.as_bytes());
+    }
+}
+impl Serable for String {
+    type ExtraOutput = ();
+
+    fn ser_into(&self, into: &mut Vec<u8>) -> Self::ExtraOutput {
+        self.as_str().ser_into(into);
     }
 }

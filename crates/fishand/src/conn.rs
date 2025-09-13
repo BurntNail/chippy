@@ -1,16 +1,19 @@
 use std::collections::VecDeque;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use futures::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio::sync::broadcast::{Sender, Receiver};
+use tokio::sync::RwLock;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::{Message, Bytes};
 use fishandchippy::events::client::EventToClient;
 use fishandchippy::events::server::{EventToServer, ServerEventDeserer};
 use fishandchippy::ser_glue::{DeserMachine, Deserable, DesiredInput, FsmResult, Serable};
 use crate::client::Client;
+use crate::Table;
 
-pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, send_event: Sender<EventToClient>, mut recv_event: Receiver<EventToClient>) -> color_eyre::Result<()> {
+pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, global_send_event: Sender<EventToClient>, mut global_recv_event: Receiver<EventToClient>, table: Arc<RwLock<Table>>) -> color_eyre::Result<()> {
     let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
     println!("New WebSocket connection: {peer}");
     
@@ -22,7 +25,7 @@ pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, send_event: 
             ws_stream.send(Message::Binary(Bytes::from_owner(msg.ser().1))).await?;
         }
         for msg in client.global_msgs_to_send() {
-            if send_event.send(msg).is_err() {
+            if global_send_event.send(msg).is_err() {
                 eprintln!("Error sending global message...");
             }
         }
@@ -34,7 +37,7 @@ pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, send_event: 
             msg = ws_stream.next() => {
                 match msg {
                     None => {
-                        client.close(None);
+                        client.close(None, &table).await;
                     }
                     Some(Err(e)) => {
                         eprintln!("Error receiving message from {client}: {e}");
@@ -45,7 +48,7 @@ pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, send_event: 
                     }
                 }
             },
-            evt = recv_event.recv() => {
+            evt = global_recv_event.recv() => {
                 if let Ok(evt) = evt {
                     ws_stream.send(Message::Binary(Bytes::from_owner(evt.ser().1))).await?;
                 }
@@ -58,6 +61,7 @@ pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, send_event: 
                     let mut binary = binary.into_iter().peekable();
                     let mut deserer = EventToServer::deser();
                     loop {
+                        //TODO: no bytes left but not done?
                         if matches!(deserer, ServerEventDeserer::Start(_)) && binary.peek().is_none() {
                             break;
                         }
@@ -71,11 +75,11 @@ pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, send_event: 
                             }
                             DesiredInput::Bytes(space) => {
                                 let mut n = 0;
-                                for i in 0..space.len() {
+                                for next_space in space {
                                     let Some(byte) = binary.next() else {
                                         break;
                                     };
-                                    space[i] = byte;
+                                    *next_space = byte;
 
                                     n += 1;
                                 }
@@ -86,18 +90,18 @@ pub async fn handle_connection(peer: SocketAddr, stream: TcpStream, send_event: 
                                     FsmResult::Continue(cont) => cont,
                                     FsmResult::Done(evt) => {
                                         println!("{client} sent {evt:?}");
-                                        client.process_event(evt);
+                                        client.process_event(evt, &table).await;
                                         EventToServer::deser()
                                     }
                                 }
                             }
-                            DesiredInput::Start => unreachable!()
+                            DesiredInput::Extra => unreachable!()
                         }
                     }
 
                 }
                 Message::Close(close) => {
-                    client.close(close);
+                    client.close(close.as_ref(), &table).await;
                 }
                 unexpected => {
                     eprintln!("received unexpected msg from {client}: {unexpected:?}");

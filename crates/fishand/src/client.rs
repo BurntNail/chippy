@@ -1,13 +1,17 @@
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
+use tokio::sync::RwLock;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use uuid::Uuid;
 use fishandchippy::events::client::EventToClient;
 use fishandchippy::events::server::EventToServer;
+use fishandchippy::game_types::player::Player;
+use crate::Table;
 
 enum ClientState {
     Connected,
     Introduced {
-        name: String
+        uuid: Uuid,
     },
     Closed,
 }
@@ -20,7 +24,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new (addr: SocketAddr) -> Self {
+    pub const fn new (addr: SocketAddr) -> Self {
         Self {
             state: ClientState::Connected,
             addr,
@@ -34,29 +38,42 @@ impl Display for Client {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self.state {
             ClientState::Connected => write!(f, "[{}]", self.addr.ip()),
-            ClientState::Introduced { name } => write!(f, "{name:?}"),
+            ClientState::Introduced { uuid } => write!(f, "[{uuid}]"),
             ClientState::Closed => write!(f, "[closed]"),
         }
     }
 }
 
 impl Client {
-    pub fn close (&mut self, reason: Option<CloseFrame>) {
+    #[allow(clippy::significant_drop_tightening)]
+    pub async fn close (&mut self, reason: Option<&CloseFrame>, table: &RwLock<Table>) {
         println!("{self} closing for {reason:?}");
-        if let ClientState::Introduced {name} = &self.state {
-            self.global_msgs_to_send.push(EventToClient::TxtSent {
-                name: "SERVER".to_string(),
-                content: format!("{name} left the server")
-            });
+        
+        if let ClientState::Introduced {uuid, ..} = &self.state {
+            let table = table.write().await;
+            
+            let quit_msg = table.players.get(uuid)
+                .map_or_else(
+                    || format!("{uuid:?} left the server"),
+                    |player| format!("{:?} left the server", player.name)
+                );
+            self.global_msgs_to_send.push(EventToClient::AdminMsg(quit_msg));
+            
+            table.pot.ready_to_put_in.remove(uuid);
+            table.players.remove(uuid);
         }
+        
         self.state = ClientState::Closed;
     }
     
-    pub fn should_quit (&self) -> bool {
+    pub const fn should_quit (&self) -> bool {
         matches!(self.state, ClientState::Closed)
     }
-    pub fn can_interact (&self) -> bool {
-        matches!(self.state, ClientState::Introduced {..})
+    pub const fn can_interact (&self) -> Option<Uuid> {
+        match self.state {
+            ClientState::Introduced {uuid} => Some(uuid),
+            _ => None
+        }
     }
 
     pub fn local_msgs_to_send (&mut self) -> impl Iterator<Item = EventToClient> {
@@ -66,24 +83,46 @@ impl Client {
         self.global_msgs_to_send.drain(..)
     }
     
-    pub fn process_event (&mut self, evt: EventToServer) {
+    pub async fn process_event (&mut self, evt: EventToServer, table: &RwLock<Table>) {
         match evt {
             EventToServer::Introduction { name } => {
                 if matches!(self.state, ClientState::Connected) {
-                    self.local_msgs_to_send.push(EventToClient::Introduced);
-                    self.global_msgs_to_send.push(EventToClient::TxtSent {
-                        name: "SERVER".to_string(),
-                        content: format!("{name} joined the server")
-                    });
-                    self.state = ClientState::Introduced {name};
+                    let uuid = Uuid::new_v4();
+                    
+                    self.local_msgs_to_send.push(EventToClient::Introduced(uuid));
+                    self.global_msgs_to_send.push(EventToClient::AdminMsg(format!("\"{name}\" joined the server")));
+                    
+                    table.write().await.players.insert(uuid, Player { name: name.clone(), balance: 0 });
+                    
+                    self.state = ClientState::Introduced {uuid};
                 }
             }
-            EventToServer::SendMessage { msg } => {
-                if self.can_interact() {
-                    self.global_msgs_to_send.push(EventToClient::TxtSent {
-                        name: self.to_string(),
-                        content: msg,
-                    });
+            EventToServer::SendMessage { content } => {
+                if let Some(uuid) = self.can_interact() {
+                    self.global_msgs_to_send.push(EventToClient::TxtSent(uuid, content));
+                }
+            }
+            EventToServer::GetStartInformation => {
+                let table = table.read().await;
+                self.local_msgs_to_send.push(EventToClient::AllPlayers(table.players.clone()));
+                self.local_msgs_to_send.push(EventToClient::Pot(table.pot.clone()));
+            }
+            EventToServer::GetSpecificPlayer(their_uuid) => {
+                let table = table.read().await;
+                if let Some(player) = table.players.get(&their_uuid).cloned() {
+                    self.local_msgs_to_send.push(EventToClient::SpecificPlayer(their_uuid, player));
+                }
+            }
+            EventToServer::AddToPot(value) => {
+                if let Some(uuid) = self.can_interact() {
+                    let mut table = table.write().await;
+                    if let Some(player) = table.players.get_mut(&uuid) && let Some(new_balance) = player.balance.checked_sub(value) {
+                        player.balance = new_balance;
+                        self.local_msgs_to_send.push(EventToClient::SpecificPlayer(uuid, player.clone()));
+                        
+                        *table.pot.ready_to_put_in.entry(uuid).or_default() += value;
+                        self.global_msgs_to_send.push(EventToClient::Pot(table.pot.clone()));
+                    }
                 }
             }
         }
